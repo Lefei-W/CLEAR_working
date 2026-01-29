@@ -13,7 +13,7 @@ source('~/plottheme.R')   # must define theme_Publication()
 wd <- '/working/lab_jonathb/lefeiW/projects/ATAC_BCAC/'
 setwd(wd)
 
-SE_LIBRARY_ROOT <- "output/snATAC_SE_library"
+SE_LIBRARY_ROOT <- "output/snATAC_SE_library" # nolint
 
 input_files <- list(
   union_peak = list(
