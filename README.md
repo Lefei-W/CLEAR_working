@@ -40,11 +40,16 @@ CLEAR addresses this gap by providing a locus-level, quantitative framework that
 - GWAS fine-mapped variants from [OpenTargets Genetics](https://platform.opentargets.org/)
 - scATAC-seq peak × cell-type matrices generated using [ArchR](https://www.archrproject.com/)
 
+### Data availability 
+
+*(subsection of the input data, )
+
 ---
 
-## Peak Signal Matrix Construction
+## ArchR Peak Signal Matrix Construction
 
 *(ArchR processing pipeline)*
+- Summariesed ArchR essential processing steps [ArchR processing](https://docs.google.com/document/d/12TJ8RZt97AsLWTHmqDecG8jwKzTnrnOjEpVfefXgW1M/edit?tab=t.0) 
 
 ---
 
@@ -56,7 +61,7 @@ CLEAR addresses this gap by providing a locus-level, quantitative framework that
 
 ## Enrichment Framework
 
-*(ranking-based enrichment logic)*
+![CLEAR graphical workflow](images/CLEAR_flowchart-1.png)
 
 ---
 
@@ -66,6 +71,8 @@ CLEAR addresses this gap by providing a locus-level, quantitative framework that
 
 ## Project Structure
 
+*(to be adapted from new CLEAR folder)*
+*(scripts to be modulised and stored under /R; )*
 ---
 
 ## Outputs
