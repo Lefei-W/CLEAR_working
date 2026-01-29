@@ -30,7 +30,7 @@ CLEAR addresses this gap by providing a locus-level, quantitative framework that
 
 ## Method Abstract
 
-![CLEAR flowchart](images/Lefei_Wang_AGTA_Lightning_Talk_Slide_13102025.svg)
+![CLEAR graphical abstract](images/CLEAR_AGTA_lightning-1.png)
 
 ---
 
