@@ -1,3 +1,4 @@
+library(ggplot2)
 theme_Publication <- function(base_size = 14, base_family = "Helvetica") {
   theme_grey(base_size = base_size, base_family = base_family) %+replace%
     theme(
