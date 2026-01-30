@@ -114,7 +114,7 @@ CLEAR computes multiple cell-type specificity metrics for each peak (regulatory 
 
 **Quantile Normalisation (QN):**
 
-$$M_{QN} = \text{quantile\_normalize}(M_{raw})$$
+$$Mat_{QN} = \mathrm{QN}(Mat_{raw})$$
 
 This ensures comparable distributions across cell types while preserving rank relationships.
 
