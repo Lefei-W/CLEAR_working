@@ -5,15 +5,15 @@ CLEAR is a framework for quantifying and ranking cell-type-specific regulatory c
 ---
 
 ## Table of Contents
+
 - [Overview](#overview)
-- [Method Abstract](#method-Abstract)
+- [Method Abstract](#method-abstract)
 - [Input Data](#input-data)
-- [Peak Signal Matrix Construction](#peak-signal-matrix-construction)
+- [ArchR Peak Signal Matrix Construction](#archr-peak-signal-matrix-construction)
 - [Specificity Metrics](#specificity-metrics)
 - [Enrichment Framework](#enrichment-framework)
 - [Usage](#usage)
 - [Project Structure](#project-structure)
-- [Reproducibility](#reproducibility)
 - [Outputs](#outputs)
 
 ---
@@ -36,26 +36,28 @@ CLEAR addresses this gap by providing a locus-level, quantitative framework that
 
 ## Input Data
 
-*(GWAS fine-mapped variants (~1500 traits from OpenTargets), scATAC-seq peak × cell-type matrices (ArchR processed))*
+<!-- TODO: GWAS fine-mapped variants (~1500 traits from OpenTargets), scATAC-seq peak × cell-type matrices (ArchR processed) -->
+
 - GWAS fine-mapped variants from [OpenTargets Genetics](https://platform.opentargets.org/)
 - scATAC-seq peak × cell-type matrices generated using [ArchR](https://www.archrproject.com/)
 
-### Data availability 
+### Data availability
 
-*(subsection of the input data, )
+<!-- TODO: subsection of the input data -->
 
 ---
 
 ## ArchR Peak Signal Matrix Construction
 
-*(ArchR processing pipeline)*
-- Summariesed ArchR essential processing steps [ArchR processing](https://docs.google.com/document/d/12TJ8RZt97AsLWTHmqDecG8jwKzTnrnOjEpVfefXgW1M/edit?tab=t.0) 
+<!-- TODO: ArchR processing pipeline -->
+
+- Summarised ArchR essential processing steps [ArchR processing](https://docs.google.com/document/d/12TJ8RZt97AsLWTHmqDecG8jwKzTnrnOjEpVfefXgW1M/edit?tab=t.0)
 
 ---
 
 ## Specificity Metrics
 
-*(L2 norm, z-score, Tau, composite metrics, etc.)*
+<!-- TODO: L2 norm, z-score, Tau, composite metrics, etc. -->
 
 ---
 
@@ -71,12 +73,11 @@ CLEAR addresses this gap by providing a locus-level, quantitative framework that
 
 ## Project Structure
 
-*(to be adapted from new CLEAR folder)*
-*(scripts to be modulised and stored under /R; )*
+<!-- TODO: to be adapted from new CLEAR folder -->
+<!-- TODO: scripts to be modularised and stored under /R -->
+
 ---
 
 ## Outputs
 
 ---
-
-
