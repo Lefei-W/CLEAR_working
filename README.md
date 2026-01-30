@@ -43,25 +43,25 @@ CLEAR addresses this gap by providing a locus-level, quantitative framework that
 
 ### Data availability
 
-The following table summarises the snATAC-seq datasets from the [Human-scATAC-Corpus](https://atlas.fredhutch.org/neftel/hscatac/) (Zhang 2021, ~0.9 million cCREs in 111 cell types from ~615k human adult cells) and other sources, along with matched GWAS traits and snRNA references.
+The following table summarises the snATAC-seq datasets from the [Human-scATAC-Corpus](https://health.tsinghua.edu.cn/human-scatac-corpus/browse.php) (Chen 2025, ~5.4 million cells from 35 datasets across 37 human tissues or cell lines) and other sources, along with matched GWAS traits and snRNA references.
 
 #### snATAC-seq Datasets
 
 | Tissue | Publication | # Donors | # Nuclei | # Cell Types | Platform | Disease Status | Notes |
 | ------ | ----------- | -------- | -------- | ------------ | -------- | -------------- | ----- |
 | Breast | [Zhang 2021](https://doi.org/10.1016/j.cell.2021.10.024) | 2 | 16,410 | 39 | sci-ATAC | Healthy | |
-| Breast | Renger 2025 | 4 | - | - | 10X | Healthy and cancerous | |
-| Pancreas | Zhang 2021 | 4 | 33,221 | 45 | sci-ATAC | Healthy | >50% acinar cells, fewer beta and alpha |
-| Brain | Velmeshev 2023 | 16 | 39,268 | 7 | 10X | Fetal/Adult | |
-| Brain | Corces 2025 | 8 | 70,631 | - | 10X | Cognitively Healthy | Donors aged >80 (one at 38); multiple brain regions; no fragments file |
-| Heart | Kanemaru 2023 | 25 | 139,835 | 12 | 10X | Healthy | Multiome + SNP enrichment analysis |
-| Blood | Lareau 2019 | 2 | 136,425 | 15 | dscATAC | - | Human bone marrow and PBMC |
-| Skin | Zhang 2021 | 6 | 26,467 | 53 | sci-ATAC | Healthy | |
-| Ovary | Jin 2025 | 8 | 41,550 | 7 | 10X | Healthy | 4 young + 4 reproductively aged donors |
-| Colon | Zhang 2021 | 4 | 55,084 | 63 | sci-ATAC | Healthy | |
-| Lung | Zhang 2021 | 4 | 19,552 | 40 | sci-ATAC | Healthy | |
-| Kidney | Muto 2021 | 5 | 24,205 | 13 | 10X | Healthy | |
-| Liver | Craig 2023 | 16 | 18,631 | 33 | 10X | Cancerous | HCC & iCCA (liver cancer subtypes) |
+| Breast | [Renger 2025](https://www.sciencedirect.com/science/article/pii/S2666979X25000217#sec4) | 4 | - | - | 10X | Healthy and cancerous | |
+| Pancreas | [Zhang 2021](https://doi.org/10.1016/j.cell.2021.10.024) | 4 | 33,221 | 45 | sci-ATAC | Healthy | >50% acinar cells, fewer beta and alpha |
+| Brain | [Velmeshev 2023](https://www.science.org/doi/10.1126/science.adf0834) | 16 | 39,268 | 7 | 10X | Fetal/Adult | |
+| Brain | [Corces 2025](https://pmc.ncbi.nlm.nih.gov/articles/PMC7606627/#SM1) | 8 | 70,631 | - | 10X | Cognitively Healthy | Donors aged >80 (one at 38); multiple brain regions; no fragments file |
+| Heart | [Kanemaru 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC10371870/) | 25 | 139,835 | 12 | 10X | Healthy | Multiome + SNP enrichment analysis |
+| Blood | [Lareau 2019](https://health.tsinghua.edu.cn/human-scatac-corpus/detail.php?sampleID=%223%22) | 2 | 136,425 | 15 | dscATAC | - | Human bone marrow and PBMC |
+| Skin | [Zhang 2021](https://doi.org/10.1016/j.cell.2021.10.024) | 6 | 26,467 | 53 | sci-ATAC | Healthy | |
+| Ovary | [Jin 2025](https://www.nature.com/articles/s43587-024-00762-5) | 8 | 41,550 | 7 | 10X | Healthy | 4 young + 4 reproductively aged donors |
+| Colon | [Zhang 2021](https://doi.org/10.1016/j.cell.2021.10.024) | 4 | 55,084 | 63 | sci-ATAC | Healthy | |
+| Lung | [Zhang 2021](https://doi.org/10.1016/j.cell.2021.10.024) | 4 | 19,552 | 40 | sci-ATAC | Healthy | |
+| Kidney | [Muto 2021](https://www.nature.com/articles/s41467-021-22368-w) | 5 | 24,205 | 13 | 10X | Healthy | |
+| Liver | [Craig 2023](https://www.sciencedirect.com/science/article/pii/S2211124723014584) | 16 | 18,631 | 33 | 10X | Cancerous | HCC & iCCA (liver cancer subtypes) |
 
 #### Matched GWAS Traits and Reference Atlases
 
