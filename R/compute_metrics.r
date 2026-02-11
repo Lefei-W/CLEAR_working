@@ -12,7 +12,7 @@ add_rank <- function(M, rn, cn) { # ranking assign to cell types (columns) which
 }
 
 compute_metrics <- function(mat, rn, cn) { # generally use the PeakMatrix from ArchR rn are the peaks and cn the cell types
-  mat_raw <- mat
+  mat_raw <- mat # keep a copy of the raw matrix for composite and logged metrics)
   dimnames(mat_raw) <- list(rn, cn)
   mat_qn <- preprocessCore::normalize.quantiles(mat)  # quantile normalisation based on CHEERS (keep empirical distri across cell types)
   dimnames(mat_qn) <- list(rn, cn)
