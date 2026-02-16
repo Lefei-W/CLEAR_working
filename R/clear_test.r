@@ -20,6 +20,14 @@ input_files <- list(
     path   = "data/PeakCalls_Xiong/union_GRSE.rds",
     assays = c("PeakMatrix", "union_bw_signal_perbp")
   ),
+  breast_final_union_331832 = list(
+    path   = '/working/lab_jonathb/lefeiW/projects/CLEAR_breast_demo/results/union_peak331832_CLEAR_se.rds',
+    assays = c("PeakMatrix")
+  ),
+  breast_final_union_531279 = list(
+    path   = '/working/lab_jonathb/lefeiW/projects/CLEAR_breast_demo/results/union_peak531279_CLEAR_se.rds',
+    assays = c("PeakMatrix")
+  ),
   merged = list(
     path   = "data/merged_peakMatrix_perBP_normalised.rds",
     assays = c("PeakMatrix_perbp", "merged_bw_signal")
@@ -80,12 +88,13 @@ add_rank <- function(M, rn, cn) { # ranking assign to cell types (columns)
 compute_metrics <- function(mat, rn, cn) {
   mat_qn <- preprocessCore::normalize.quantiles(mat)  # quantile normalisation based on CHEERS (keep empirical distri across cell types)
   dimnames(mat_qn) <- list(rn, cn)
+  mat_raw <- mat # Keeps a copy for composite! 
   mat <- mat_qn # use this normalised matrix for all other specificity calculations 
   
   scaled_mat  <- t(apply(mat, 1, scale));       dimnames(scaled_mat)  <- list(rn, cn) # Z scaling
   l2norm_mat  <- t(apply(mat, 1, safe_l2));     dimnames(l2norm_mat)  <- list(rn, cn) # l2 !!!!!!
-  compsc1_mat <- l2norm_mat + log2(mat + 1);    dimnames(compsc1_mat) <- list(rn, cn) # Composite calculations 
-  compsc2_mat <- l2norm_mat * log2(mat + 1);    dimnames(compsc2_mat) <- list(rn, cn)
+  compsc1_mat <- l2norm_mat + log2(mat_raw + 1);    dimnames(compsc1_mat) <- list(rn, cn) # Composite calculations 
+  compsc2_mat <- l2norm_mat * log2(mat_raw + 1);    dimnames(compsc2_mat) <- list(rn, cn)
   
   # Tau calclulations 
   calc_tau <- function(x) if (max(x) == 0) 0 else sum(1 - (x / max(x))) / (length(x) - 1)
@@ -96,8 +105,8 @@ compute_metrics <- function(mat, rn, cn) {
     dimnames = list(rn, cn)
   )
   
-  compsc1_tau <- tau_mat + log2(mat + 1); dimnames(compsc1_tau) <- list(rn, cn)
-  compsc2_tau <- tau_mat * log2(mat + 1); dimnames(compsc2_tau) <- list(rn, cn)
+  compsc1_tau <- tau_mat + log2(mat_raw + 1); dimnames(compsc1_tau) <- list(rn, cn)
+  compsc2_tau <- tau_mat * log2(mat_raw + 1); dimnames(compsc2_tau) <- list(rn, cn)
   
   list(
     zscaled             = scaled_mat,
@@ -535,83 +544,164 @@ make_plot_df_from_overlap <- function(se_overlap) {
 }
 
 
-# Stacked barplots of per-variant cell-type contributions for selected cell type–specific peaks
+# Stacked barplots of per-variant cell-type contributions for highly specific peaks
 plot_celltype_stackbars <- function(
     se_overlap,
-    rank_metric   = "spec_rank",
-    value_metric  = "l2_norm",
-    top_cutoff    = 0.10,
+    value_metric    = "l2_norm",
+    value_threshold = 0.5,
     outfile,
-    max_peaks_per_ct = 50
+    max_peaks_per_ct = 100
 ) {
   stopifnot(!missing(outfile))
-  if (!rank_metric %in% assayNames(se_overlap)) {
-    warning("Assay '", rank_metric, "' not found; skipping stack bar plots.")
-    return(invisible(FALSE))
-  }
+  
   if (!value_metric %in% assayNames(se_overlap)) {
     warning("Assay '", value_metric, "' not found; skipping stack bar plots.")
     return(invisible(FALSE))
   }
-  rank_mat <- SummarizedExperiment::assay(se_overlap, rank_metric)
-  val_mat  <- SummarizedExperiment::assay(se_overlap, value_metric)
-  if (inherits(rank_mat, "Matrix")) rank_mat <- as.matrix(rank_mat)
-  if (inherits(val_mat,  "Matrix")) val_mat  <- as.matrix(val_mat)
-  storage.mode(rank_mat) <- "double"
-  storage.mode(val_mat)  <- "double"
+  
+  val_mat <- SummarizedExperiment::assay(se_overlap, value_metric)
+  if (inherits(val_mat, "Matrix")) val_mat <- as.matrix(val_mat)
+  storage.mode(val_mat) <- "double"
+  
+  # plot squared contributions so stacks sum to ~1 per peak (if L2-normalized per peak)
+  val_plot <- val_mat^2
+  
+  # Labels
   rd <- as.data.frame(rowData(se_overlap))
-  peakid <- if ("peakid" %in% names(rd)) rd$peakid else rownames(se_overlap)
-  ccv_label <- if ("CCVs" %in% names(rd)) rd$CCVs else ""
-  sig_label <- if ("signal" %in% names(rd)) rd$signal else ""
+  peakid     <- if ("peakid" %in% names(rd)) rd$peakid else rownames(se_overlap)
+  ccv_label  <- if ("CCVs"  %in% names(rd)) rd$CCVs  else ""
+  sig_label  <- if ("signal" %in% names(rd)) rd$signal else ""
   base_label <- ifelse(nzchar(ccv_label), ccv_label, peakid)
-  labels <- ifelse(nzchar(sig_label), paste0(base_label, " (", sig_label, ")"), base_label)
+  labels     <- ifelse(nzchar(sig_label), paste0(base_label, " (", sig_label, ")"), base_label)
+  
+  n_pages <- 0L
   grDevices::pdf(outfile, width = 10, height = 6)
   on.exit(grDevices::dev.off(), add = TRUE)
-  for (ct in colnames(rank_mat)) {
-    ct_rank <- suppressWarnings(as.numeric(rank_mat[, ct]))
-    if (all(is.na(ct_rank))) next
-    thresh <- stats::quantile(ct_rank, probs = 1 - top_cutoff, na.rm = TRUE)
-    sel <- which(ct_rank >= thresh)
+  
+  for (ct in colnames(val_mat)) {
+    
+    # --- selection: peaks where THIS cell type's specificity score >= threshold ---
+    sel <- which(val_mat[, ct] >= value_threshold)
     if (!length(sel)) next
+    
+    # cap plotted peaks (keep highest-scoring)
     if (length(sel) > max_peaks_per_ct) {
-      ord <- order(ct_rank[sel], decreasing = TRUE, na.last = NA)
-      sel <- sel[ord][seq_len(max_peaks_per_ct)]
+      ord <- order(val_mat[sel, ct], decreasing = TRUE)[seq_len(max_peaks_per_ct)]
+      sel <- sel[ord]
     }
-    submat <- val_mat[sel, , drop = FALSE]
+    
+    submat <- val_plot[sel, , drop = FALSE]
+    
     df <- as.data.frame(submat, check.names = FALSE)
     df$peak_label <- labels[sel]
+    
+    # order peaks by current ct's squared contribution (descending)
     target_vals <- df[[ct]]
     peak_levels <- df$peak_label[order(target_vals, decreasing = TRUE, na.last = NA)]
     if (!length(peak_levels)) peak_levels <- df$peak_label
+    
     long <- tidyr::pivot_longer(
       df,
-      cols      = tidyselect::all_of(colnames(val_mat)),
+      cols      = tidyselect::all_of(colnames(val_plot)),
       names_to  = "celltype",
       values_to = "value"
     )
+    
     long$peak_label <- factor(long$peak_label, levels = rev(unique(peak_levels)))
     long$highlight  <- long$celltype == ct
+    
+    # stack order: ct at bottom, others by total squared contribution
+    ct_sums <- colSums(submat, na.rm = TRUE)
+    other_levels <- names(sort(ct_sums, decreasing = TRUE))
+    other_levels <- setdiff(other_levels, ct)
+    long$celltype <- factor(long$celltype, levels = c(ct, other_levels))
+    
     p <- ggplot(long) +
-      geom_bar(aes(x = peak_label, y = value, fill = celltype, alpha = highlight),
-               stat = "identity") +
+      geom_bar(
+        aes(x = peak_label, y = value, fill = celltype, alpha = highlight),
+        stat = "identity"
+      ) +
       scale_alpha_manual(values = c("FALSE" = 0.5, "TRUE" = 1), guide = "none") +
       labs(
-        title = paste0(ct, " | ", value_metric, " | top ", round(top_cutoff * 100, 1), "% by ", rank_metric),
+        title = paste0(ct, " | ", value_metric, "\u00B2 | ", value_metric, " >= ", value_threshold),
         x     = "Peak / CCV",
-        y     = value_metric
+        y     = paste0(value_metric, "\u00B2")
       ) +
       theme_Publication() +
       theme(
-        axis.text.x  = element_text(angle = 60, hjust = 1, vjust = 1, size = 8),
-        axis.text.y  = element_text(size = 8),
-        legend.text  = element_text(size = 8),
-        legend.title = element_text(size = 9),
+        axis.text.x  = element_text(angle = 60, hjust = 1, vjust = 1, size = 4),
+        axis.text.y  = element_text(size = 6),
+        legend.text  = element_text(size = 6),
+        legend.title = element_text(size = 8),
         plot.title   = element_text(size = 11)
       )
+    
     print(p)
+    n_pages <- n_pages + 1L
   }
-  message("  ✓ Saved cell-type stackbars: ", outfile)
-  invisible(TRUE)
+  
+  if (n_pages == 0L) {
+    warning("No cell types had peaks with ", value_metric, " >= ", value_threshold, "; PDF is empty.")
+  }
+  message("  ✓ Saved cell-type stackbars (", n_pages, " pages): ", outfile)
+  invisible(n_pages > 0L)
+}
+
+
+# Peak specificity distribution: how many cell types is each peak "active" in at various thresholds
+plot_peak_specificity_distribution <- function(
+    se,
+    metric       = "l2_norm",
+    thresholds   = seq(0, 0.9, 0.1),
+    outfile      = NULL,
+    title_prefix = ""
+) {
+  if (!metric %in% assayNames(se)) {
+    warning("Assay '", metric, "' not found; skipping specificity distribution.")
+    return(invisible(NULL))
+  }
+  
+  mat <- SummarizedExperiment::assay(se, metric)
+  if (inherits(mat, "Matrix")) mat <- as.matrix(mat)
+  storage.mode(mat) <- "double"
+  n_ct <- ncol(mat)
+  
+  # For each threshold, count how many cell types each peak exceeds
+  df_list <- lapply(thresholds, function(t) {
+    k <- rowSums(mat > t)
+    tab <- table(factor(k, levels = 0:n_ct))
+    data.frame(
+      threshold    = t,
+      n_active_cts = as.integer(names(tab)),
+      n_peaks      = as.integer(tab),
+      stringsAsFactors = FALSE
+    )
+  })
+  df <- dplyr::bind_rows(df_list)
+  df$threshold_label <- factor(
+    paste0("T=", df$threshold),
+    levels = paste0("T=", sort(unique(df$threshold)))
+  )
+  
+  p <- ggplot(df, aes(x = n_active_cts, y = n_peaks, fill = threshold_label)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~ threshold_label, scales = "free_y") +
+    labs(
+      title = paste0(title_prefix, "Peak specificity distribution (", metric, ")"),
+      x     = paste0("# cell types with ", metric, " > threshold"),
+      y     = "# peaks"
+    ) +
+    theme_Publication() +
+    theme(axis.text.x = element_text(size = 7))
+  
+  if (!is.null(outfile)) {
+    grDevices::pdf(outfile, width = 12, height = 8)
+    print(p)
+    grDevices::dev.off()
+    message("  ✓ Saved specificity distribution: ", outfile)
+  }
+  
+  invisible(list(data = df, plot = p))
 }
 
 
@@ -621,12 +711,13 @@ plot_celltype_stackbars <- function(
 
 run_trait_from_overlap_library <- function(
     TRAIT_CODE,
-    overlap_root = file.path("output/CLEAR_OVERLAPS", paste0(TRAIT_CODE, "__hg38")),
-    out_root     = file.path("output/CLEAR_FROM_OVERLAPS", paste0(TRAIT_CODE, "__hg38")),
-    rank_types   = c("spec_rank","comp1_rank","comp2_rank","tau_rank","compsc1_tau_rank","compsc2_tau_rank"),
-    score_types  = c("spec_rank","comp1","comp2","tau_rank","compsc1_tau_rank","compsc2_tau_rank"),
-    top_cutoff   = 0.10,
-    force        = FALSE
+    overlap_root   = file.path("output/CLEAR_OVERLAPS", paste0(TRAIT_CODE, "__hg38")),
+    out_root       = file.path("output/CLEAR_FROM_OVERLAPS", paste0(TRAIT_CODE, "__hg38")),
+    rank_types     = c("spec_rank","comp1_rank","comp2_rank","tau_rank","compsc1_tau_rank","compsc2_tau_rank"),
+    spec_metric    = "l2_norm",
+    conc_threshold = 0.8,   # sum of L2^2 across the top-k cell types must exceed this
+    max_k          = 4,     # check k = 1, 2, ..., max_k dominant cell types
+    force          = FALSE
 ) {
   stopifnot(dir.exists(overlap_root))
   dir.create(out_root, recursive = TRUE, showWarnings = FALSE)
@@ -650,7 +741,7 @@ run_trait_from_overlap_library <- function(
     dir.create(trait_dir, recursive = TRUE, showWarnings = FALSE)
     input_id <- paste0(TRAIT_CODE, "__", settings_id)
     
-    final_file <- file.path(trait_dir, paste0(input_id, "_highrank_summary.tsv"))
+    final_file <- file.path(trait_dir, paste0(input_id, "_summary.tsv"))
     if (!force && file.exists(final_file)) {
       message(">> Skipping (already finished): ", settings_id)
       next
@@ -663,6 +754,7 @@ run_trait_from_overlap_library <- function(
     grDevices::pdf(pdf_path, width = 10, height = 5)
     
     core_enriched_cts <- character(0)
+    all_meanrank <- list()
     
     for (rt in rank_types) {
       mr <- meanrank_from_overlap(se, rt)
@@ -691,129 +783,130 @@ run_trait_from_overlap_library <- function(
         theme(legend.position = "none")
       
       print(p_)
-      readr::write_tsv(
-        mr,
-        file.path(trait_dir, paste0(input_id, "_", rt, "_meanrank.tsv"))
-      )
+      mr$rank_type <- rt
+      all_meanrank[[rt]] <- mr
     }
     
     grDevices::dev.off()  # <- clean close of the PDF
-    
-    ## 2. High-Rank Summaries
-    plot_df <- make_plot_df_from_overlap(se) |>
-      dplyr::filter(!is.na(signal) & nzchar(signal))
-    
-    # --- CRITICAL CHECK 1: any rows with signal? ---
-    if (nrow(plot_df) == 0) {
-      warning("Filtered plot_df is empty (no valid signal ID). Skipping high-rank summaries for ", settings_id)
-      
-      score_summary <- dplyr::bind_rows(
-        lapply(
-          score_types,
-          function(st)
-            tibble::tibble(
-              score_type     = st,
-              n_CCVs         = 0L,
-              n_signals      = 0L,
-              n_peaks        = 0L,
-              n_celltypes    = 0L,
-              residue_signal = 0L,
-              core_ct_signal = 0L
-            )
-        )
+    if (length(all_meanrank)) {
+      readr::write_tsv(
+        dplyr::bind_rows(all_meanrank),
+        file.path(trait_dir, paste0(input_id, "_meanrank.tsv"))
       )
-      readr::write_tsv(score_summary, final_file)
+    }
+    
+    ## 2. Specificity-based peak–cell-type assignments
+    ##    For each peak, find if k = 1..max_k cell types concentrate >= conc_threshold
+    ##    of the L2^2 signal (i.e. sum of top-k squared scores >= conc_threshold),
+    ##    with each contributing cell type scoring >= sqrt(conc_threshold / k).
+    
+    if (!spec_metric %in% assayNames(se)) {
+      warning("Assay '", spec_metric, "' not found; skipping specificity summaries for ", settings_id)
+      readr::write_tsv(tibble::tibble(), final_file)
       next
     }
     
-    summary_list <- list()
+    spec_mat <- SummarizedExperiment::assay(se, spec_metric)
+    if (inherits(spec_mat, "Matrix")) spec_mat <- as.matrix(spec_mat)
+    storage.mode(spec_mat) <- "double"
+    spec_sq <- spec_mat^2  # squared L2 norms; rows sum to ~1
     
-    for (score_type in score_types) {
-      if (!score_type %in% names(plot_df)) next
+    rd <- as.data.frame(rowData(se))
+    peakids  <- if ("peakid" %in% names(rd)) rd$peakid else rownames(se)
+    ccv_col  <- if ("CCVs"   %in% names(rd)) rd$CCVs   else rep("", nrow(se))
+    sig_col  <- if ("signal"  %in% names(rd)) rd$signal  else rep("", nrow(se))
+    
+    specific_peaks <- list()
+    
+    for (k in seq_len(max_k)) {
+      min_per_ct <- sqrt(conc_threshold / k)
       
-      df <- plot_df |>
-        dplyr::select(
-          peakid, celltype, signal, CCVs,
-          rank = !!rlang::sym(score_type)
-        ) |>
-        dplyr::mutate(rank = suppressWarnings(as.numeric(rank))) |>
-        dplyr::group_by(celltype) |>
-        dplyr::mutate(
-          thresh   = if (all(is.na(rank))) NA_real_
-          else stats::quantile(rank, probs = top_cutoff, na.rm = TRUE),
-          highrank = ifelse(is.na(thresh), FALSE, rank <= thresh)
-        ) |>
-        dplyr::ungroup() |>
-        dplyr::mutate(core_enriched = celltype %in% core_enriched_cts)
-      
-      readr::write_tsv(
-        df,
-        file.path(trait_dir, paste0(input_id, "_", score_type, "_highrank_all.tsv"))
-      )
-      
-      df_top <- dplyr::filter(df, highrank)
-      
-      # --- CRITICAL CHECK 2: any high-rank peaks? ---
-      if (nrow(df_top) == 0L) {
-        summary_list[[score_type]] <- tibble::tibble(
-          score_type     = score_type,
-          n_CCVs         = 0L,
-          n_signals      = 0L,
-          n_peaks        = 0L,
-          n_celltypes    = 0L,
-          residue_signal = 0L,
-          core_ct_signal = 0L
-        )
-        next
+      for (i in seq_len(nrow(spec_sq))) {
+        row_sorted <- sort(spec_sq[i, ], decreasing = TRUE)
+        top_k_sum  <- sum(row_sorted[seq_len(min(k, length(row_sorted)))])
+        
+        if (top_k_sum < conc_threshold) next
+        
+        # which cell types pass the per-ct threshold?
+        passing_cts <- names(which(spec_mat[i, ] >= min_per_ct))
+        if (length(passing_cts) < 1L || length(passing_cts) > k) next
+        
+        for (ct in passing_cts) {
+          specific_peaks[[length(specific_peaks) + 1L]] <- data.frame(
+            peakid        = peakids[i],
+            celltype      = ct,
+            signal        = sig_col[i],
+            CCVs          = ccv_col[i],
+            l2_score      = spec_mat[i, ct],
+            l2_sq         = spec_sq[i, ct],
+            top_k_sq_sum  = top_k_sum,
+            k             = k,
+            min_per_ct    = min_per_ct,
+            core_enriched = ct %in% core_enriched_cts,
+            stringsAsFactors = FALSE
+          )
+        }
       }
-      
-      per_signal <- df_top |>
-        dplyr::group_by(signal) |>
-        dplyr::summarise(
-          n_peaks     = dplyr::n_distinct(peakid),
-          any_core_ct = any(core_enriched),
-          .groups     = "drop"
-        )
-      
-      summary_list[[score_type]] <- tibble::tibble(
-        score_type     = score_type,
-        n_CCVs         = dplyr::n_distinct(df_top$CCVs),
-        n_signals      = dplyr::n_distinct(df_top$signal),
-        n_peaks        = dplyr::n_distinct(df_top$peakid),
-        n_celltypes    = dplyr::n_distinct(df_top$celltype),
-        residue_signal = sum(!per_signal$any_core_ct),
-        core_ct_signal = sum(per_signal$any_core_ct)
-      )
+    }
+    
+    if (length(specific_peaks)) {
+      spec_df <- dplyr::bind_rows(specific_peaks) |>
+        dplyr::distinct(peakid, celltype, .keep_all = TRUE)  # keep smallest k
       
       readr::write_tsv(
-        df_top,
-        file.path(trait_dir, paste0(input_id, "_", score_type, "_highrank_peaks.tsv"))
+        spec_df,
+        file.path(trait_dir, paste0(input_id, "_specific_peaks.tsv"))
+      )
+      
+      ## Per-k summary
+      spec_summary <- spec_df |>
+        dplyr::group_by(k) |>
+        dplyr::summarise(
+          n_peaks        = dplyr::n_distinct(peakid),
+          n_celltypes    = dplyr::n_distinct(celltype),
+          n_signals      = dplyr::n_distinct(signal[nzchar(signal)]),
+          n_CCVs         = dplyr::n_distinct(CCVs[nzchar(CCVs)]),
+          n_core_ct      = sum(core_enriched),
+          n_residue_ct   = sum(!core_enriched),
+          .groups        = "drop"
+        )
+      readr::write_tsv(spec_summary, final_file)
+    } else {
+      readr::write_tsv(
+        tibble::tibble(
+          k = seq_len(max_k), n_peaks = 0L, n_celltypes = 0L,
+          n_signals = 0L, n_CCVs = 0L, n_core_ct = 0L, n_residue_ct = 0L
+        ),
+        final_file
       )
     }
     
-    score_summary <- dplyr::bind_rows(summary_list)
-    readr::write_tsv(score_summary, final_file)
-    
-    ## 3. Cell-type stacked bar plots for high-ranked peaks (paired rank/value)
-    rank_value_pairs <- list(
-      spec_rank  = "l2_norm",
-      comp1_rank = "comp1",
-      comp2_rank = "comp2"
-    )
-    for (rk in names(rank_value_pairs)) {
-      val <- rank_value_pairs[[rk]]
-      stack_pdf <- file.path(trait_dir, paste0(input_id, "_", rk, "_stackbars.pdf"))
+    ## 3. Cell-type stacked bar plots for peaks with high specificity scores
+    stack_metrics <- c("l2_norm", "comp1", "comp2")
+    for (vm in stack_metrics) {
+      stack_pdf <- file.path(trait_dir, paste0(input_id, "_", vm, "_stackbars.pdf"))
       try(
         plot_celltype_stackbars(
-          se_overlap  = se,
-          rank_metric = rk,
-          value_metric = val,
-          top_cutoff  = top_cutoff,
-          outfile     = stack_pdf
+          se_overlap      = se,
+          value_metric    = vm,
+          value_threshold = 0.5,
+          outfile         = stack_pdf
         ),
-        silent = TRUE
+        silent = FALSE
       )
     }
+    
+    ## 4. Peak specificity distribution
+    spec_pdf <- file.path(trait_dir, paste0(input_id, "_specificity_distribution.pdf"))
+    try(
+      plot_peak_specificity_distribution(
+        se           = se,
+        metric       = "l2_norm",
+        outfile      = spec_pdf,
+        title_prefix = paste0(input_id, " | ")
+      ),
+      silent = FALSE
+    )
     
     message(">> Finished (from overlaps) | SE=", settings_id)
   }
@@ -889,13 +982,14 @@ build_overlap_rse_for_library(
 ## 3) Run CLEAR from overlaps
 out_root <- file.path("output/CLEAR_FROM_OVERLAPS", paste0(TRAIT_CODE, "__", GENOME))
 run_trait_from_overlap_library(
-  TRAIT_CODE   = TRAIT_CODE,
-  overlap_root = overlap_root,
-  out_root     = out_root,
-  rank_types   = c("spec_rank","comp1_rank","comp2_rank","tau_rank","compsc1_tau_rank","compsc2_tau_rank"),
-  score_types  = c("spec_rank","comp1","comp2","tau_rank","compsc1_tau_rank","compsc2_tau_rank"),
-  top_cutoff   = 0.10,
-  force        = TRUE
+  TRAIT_CODE     = TRAIT_CODE,
+  overlap_root   = overlap_root,
+  out_root       = out_root,
+  rank_types     = c("spec_rank","comp1_rank","comp2_rank"),
+  spec_metric    = "l2_norm",
+  conc_threshold = 0.8,
+  max_k          = 4,
+  force          = TRUE
 )
 
 message("CLEAR run from overlaps completed for TRAIT=", TRAIT_CODE, " | genome=", GENOME)
