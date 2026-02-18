@@ -85,49 +85,105 @@ add_rank <- function(M, rn, cn) { # ranking assign to cell types (columns)
   R # ranking matrix 
 }
 
-compute_metrics <- function(mat, rn, cn) {
-  mat_qn <- preprocessCore::normalize.quantiles(mat)  # quantile normalisation based on CHEERS (keep empirical distri across cell types)
-  dimnames(mat_qn) <- list(rn, cn)
-  mat_raw <- mat # Keeps a copy for composite! 
-  mat <- mat_qn # use this normalised matrix for all other specificity calculations 
-  
-  scaled_mat  <- t(apply(mat, 1, scale));       dimnames(scaled_mat)  <- list(rn, cn) # Z scaling
-  l2norm_mat  <- t(apply(mat, 1, safe_l2));     dimnames(l2norm_mat)  <- list(rn, cn) # l2 !!!!!!
-  compsc1_mat <- l2norm_mat + log2(mat_raw + 1);    dimnames(compsc1_mat) <- list(rn, cn) # Composite calculations 
-  compsc2_mat <- l2norm_mat * log2(mat_raw + 1);    dimnames(compsc2_mat) <- list(rn, cn)
-  
-  # Tau calclulations 
-  calc_tau <- function(x) if (max(x) == 0) 0 else sum(1 - (x / max(x))) / (length(x) - 1)
-  tau_vec  <- apply(mat, 1, calc_tau)
-  tau_mat  <- matrix(
-    rep(tau_vec, ncol(mat)),
-    nrow = nrow(mat), ncol = ncol(mat),
-    dimnames = list(rn, cn)
-  )
-  
-  compsc1_tau <- tau_mat + log2(mat_raw + 1); dimnames(compsc1_tau) <- list(rn, cn)
-  compsc2_tau <- tau_mat * log2(mat_raw + 1); dimnames(compsc2_tau) <- list(rn, cn)
-  
+## compute all single-matrix transformations + row-level summaries
+## Returns a named list of matrices (same dims as input)
+.transform_single_mat <- function(mat, mat_raw, rn, cn) {
+  k <- ncol(mat)
+
+  # --- per-row transformations (each returns peak × celltype matrix) ---
+  zscaled   <- t(apply(mat, 1, scale));       dimnames(zscaled)  <- list(rn, cn)
+  l2_norm   <- t(apply(mat, 1, safe_l2));     dimnames(l2_norm)  <- list(rn, cn)
+
+  # Proportion: signal(peak,ct) / row_sum  (simplex)
+  row_sums  <- rowSums(mat)
+  row_sums[row_sums == 0] <- 1  # avoid 0/0
+  prop_mat  <- mat / row_sums;               dimnames(prop_mat) <- list(rn, cn)
+
+  # Composite scores (combine specificity + magnitude)
+  log_raw   <- log2(mat_raw + 1);             dimnames(log_raw)  <- list(rn, cn)
+  comp1     <- l2_norm + log_raw;             dimnames(comp1)    <- list(rn, cn)
+  comp2     <- l2_norm * log_raw;             dimnames(comp2)    <- list(rn, cn)
+
+  # Tau (tissue specificity index)
+  calc_tau  <- function(x) if (max(x) == 0) 0 else sum(1 - (x / max(x))) / (length(x) - 1)
+  tau_vec   <- apply(mat, 1, calc_tau)
+  tau_mat   <- matrix(rep(tau_vec, k), nrow = nrow(mat), ncol = k, dimnames = list(rn, cn))
+  comp1_tau <- tau_mat + log_raw;             dimnames(comp1_tau) <- list(rn, cn)
+  comp2_tau <- tau_mat * log_raw;             dimnames(comp2_tau) <- list(rn, cn)
+
+  # Gini entropy on L2-normalised squared scores  H = -sum(x^2 * log(x^2))
+  l2sq <- l2_norm^2
+  row_entropy <- apply(l2sq, 1, function(x) {
+    x <- x[x > 0]
+    -sum(x * log(x))
+  })
+  gini_mat <- matrix(rep(row_entropy, k), nrow = nrow(mat), ncol = k, dimnames = list(rn, cn))
+
+  # Effective number of cell types (inverse Simpson on L2-normalised scores)
+  #   N_eff = 1 / sum(x_i^4)   where x_i are already L2-normed (sum(x^2)=1)
+  row_neff <- 1 / rowSums(l2_norm^4)
+  row_neff[!is.finite(row_neff)] <- 0
+  neff_mat <- matrix(rep(row_neff, k), nrow = nrow(mat), ncol = k, dimnames = list(rn, cn))
+
   list(
-    zscaled             = scaled_mat,
-    l2_norm             = l2norm_mat,
-    comp1               = compsc1_mat,
-    comp2               = compsc2_mat,
-    spec_rank           = add_rank(l2norm_mat,  rn, cn),
-    comp1_rank          = add_rank(compsc1_mat, rn, cn),
-    comp2_rank          = add_rank(compsc2_mat, rn, cn),
-    tau                 = tau_mat,
-    tau_rank            = add_rank(tau_mat, rn, cn),
-    compsc1_tau         = compsc1_tau,
-    compsc1_tau_rank    = add_rank(compsc1_tau, rn, cn),
-    compsc2_tau         = compsc2_tau,
-    compsc2_tau_rank    = add_rank(compsc2_tau, rn, cn)
+    zscaled   = zscaled,
+    logged    = log_raw,
+    l2_norm   = l2_norm,
+    prop      = prop_mat,
+    comp1     = comp1,
+    comp2     = comp2,
+    tau       = tau_mat,
+    comp1_tau = comp1_tau,
+    comp2_tau = comp2_tau,
+    gini      = gini_mat,
+    neff      = neff_mat
   )
 }
 
+## Names of the metrics produced by .transform_single_mat (order preserved)
+.METRIC_NAMES <- c(
+  "zscaled","logged","l2_norm","prop","comp1","comp2",
+  "tau","comp1_tau","comp2_tau","gini","neff"
+)
+
+compute_metrics <- function(mat, rn, cn) {
+  mat_raw <- mat
+  dimnames(mat_raw) <- list(rn, cn)
+
+  # Quantile normalisation (CHEERS-inspired, equalises empirical distributions across cell types)
+  mat_qn <- preprocessCore::normalize.quantiles(mat)
+  dimnames(mat_qn) <- list(rn, cn)
+
+  # --- Transformations on raw PeakMatrix ---
+  raw_out <- .transform_single_mat(mat_raw, mat_raw, rn, cn)
+
+  # --- Transformations on QN matrix (composites still use log2(raw+1) for magnitude) ---
+  qn_out  <- .transform_single_mat(mat_qn, mat_raw, rn, cn)
+
+  # --- Build output: raw_*, qn_*, and all ranks ---
+  out <- list()
+
+  # The raw PeakMatrix and QN matrix themselves
+  out[["quantile_normalized"]] <- mat_qn
+
+  for (nm in .METRIC_NAMES) {
+    out[[paste0("raw_", nm)]]      <- raw_out[[nm]]
+    out[[paste0("raw_", nm, "_rank")]] <- add_rank(raw_out[[nm]], rn, cn)
+    out[[paste0("qn_",  nm)]]      <- qn_out[[nm]]
+    out[[paste0("qn_",  nm, "_rank")]] <- add_rank(qn_out[[nm]], rn, cn)
+  }
+
+  out
+}
+
+## All derived assay names (auto-generated from .METRIC_NAMES)
 DERIVED_ASSAYS <- c(
-  "zscaled","l2_norm","comp1","comp2","spec_rank","comp1_rank","comp2_rank",
-  "tau","tau_rank","compsc1_tau","compsc1_tau_rank","compsc2_tau","compsc2_tau_rank"
+  "quantile_normalized",
+  as.vector(outer(
+    c("raw_", "qn_"),
+    c(.METRIC_NAMES, paste0(.METRIC_NAMES, "_rank")),
+    paste0
+  ))
 )
 
 
@@ -522,8 +578,7 @@ make_plot_df_from_overlap <- function(se_overlap) {
   rd$signal[is.na(rd$signal)] <- ""
   
   assays <- intersect(
-    c("l2_norm","spec_rank","comp1","comp1_rank","comp2","comp2_rank",
-      "tau","tau_rank","compsc1_tau","compsc1_tau_rank","compsc2_tau","compsc2_tau_rank"),
+    DERIVED_ASSAYS,
     assayNames(se_overlap)
   )
   if (!length(assays)) return(tibble::tibble())
@@ -547,7 +602,7 @@ make_plot_df_from_overlap <- function(se_overlap) {
 # Stacked barplots of per-variant cell-type contributions for highly specific peaks
 plot_celltype_stackbars <- function(
     se_overlap,
-    value_metric    = "l2_norm",
+    value_metric    = "qn_l2_norm",
     value_threshold = 0.5,
     outfile,
     max_peaks_per_ct = 100
@@ -651,7 +706,7 @@ plot_celltype_stackbars <- function(
 # Peak specificity distribution: how many cell types is each peak "active" in at various thresholds
 plot_peak_specificity_distribution <- function(
     se,
-    metric       = "l2_norm",
+    metric       = "qn_l2_norm",
     thresholds   = seq(0, 0.9, 0.1),
     outfile      = NULL,
     title_prefix = ""
@@ -705,6 +760,122 @@ plot_peak_specificity_distribution <- function(
 }
 
 
+# Correlation plot triplets:
+#   Panel 1: raw PeakMatrix (reference, col means per cell type)
+#   Panel 2: transformed metric on PeakMatrix  (raw_*)
+#   Panel 3: transformed metric on PeakMatrix_QN (qn_*)
+# One PDF page per metric × cell-type-pair
+plot_metric_correlations <- function(
+    se,
+    input_assay     = NULL,
+    metrics         = c("l2_norm","prop","comp1","comp2","tau","gini","neff"),
+    outfile         = NULL,
+    sample_n        = 5000,    # down-sample peaks for speed
+    title_prefix    = ""
+) {
+  # Determine the raw input assay used for compute_metrics
+  if (is.null(input_assay)) input_assay <- choose_input_assay(se)
+  if (!input_assay %in% assayNames(se)) {
+    warning("Input assay '", input_assay, "' not found in SE; skipping correlation plots.")
+    return(invisible(NULL))
+  }
+
+  mat_ref <- SummarizedExperiment::assay(se, input_assay)
+  if (inherits(mat_ref, "Matrix")) mat_ref <- as.matrix(mat_ref)
+  storage.mode(mat_ref) <- "double"
+
+  # Subsample rows for plotting
+  idx <- if (nrow(mat_ref) > sample_n) sort(sample.int(nrow(mat_ref), sample_n)) else seq_len(nrow(mat_ref))
+
+  if (!is.null(outfile)) {
+    grDevices::pdf(outfile, width = 15, height = 5)
+    on.exit(grDevices::dev.off(), add = TRUE)
+  }
+
+  n_pages <- 0L
+
+  for (m in metrics) {
+    raw_name <- paste0("raw_", m)
+    qn_name  <- paste0("qn_",  m)
+
+    has_raw <- raw_name %in% assayNames(se)
+    has_qn  <- qn_name  %in% assayNames(se)
+    if (!has_raw && !has_qn) next
+
+    raw_mat <- if (has_raw) {
+      mm <- SummarizedExperiment::assay(se, raw_name)
+      if (inherits(mm, "Matrix")) mm <- as.matrix(mm); storage.mode(mm) <- "double"; mm
+    } else NULL
+
+    qn_mat <- if (has_qn) {
+      mm <- SummarizedExperiment::assay(se, qn_name)
+      if (inherits(mm, "Matrix")) mm <- as.matrix(mm); storage.mode(mm) <- "double"; mm
+    } else NULL
+
+    # Build tidy data for all cell types at once (vectorised)
+    ref_sub <- mat_ref[idx, , drop = FALSE]
+    cts     <- colnames(mat_ref)
+    n_sub   <- length(idx)
+
+    df_list <- lapply(cts, function(ct) {
+      d <- data.frame(
+        celltype = ct,
+        ref      = ref_sub[, ct],
+        stringsAsFactors = FALSE
+      )
+      d$raw_val <- if (!is.null(raw_mat)) raw_mat[idx, ct] else NA_real_
+      d$qn_val  <- if (!is.null(qn_mat))  qn_mat[idx, ct]  else NA_real_
+      d
+    })
+    df <- dplyr::bind_rows(df_list)
+
+    # Panel 1: ref vs raw
+    cor_raw <- if (!is.null(raw_mat)) {
+      round(cor(as.vector(ref_sub), as.vector(raw_mat[idx, ]), use = "complete.obs"), 3)
+    } else NA
+    # Panel 2: ref vs qn
+    cor_qn <- if (!is.null(qn_mat)) {
+      round(cor(as.vector(ref_sub), as.vector(qn_mat[idx, ]), use = "complete.obs"), 3)
+    } else NA
+    # Panel 3: raw vs qn
+    cor_rq <- if (!is.null(raw_mat) && !is.null(qn_mat)) {
+      round(cor(as.vector(raw_mat[idx, ]), as.vector(qn_mat[idx, ]), use = "complete.obs"), 3)
+    } else NA
+
+    p1 <- ggplot(df, aes(x = ref, y = raw_val)) +
+      geom_point(alpha = 0.15, size = 0.3) +
+      facet_wrap(~ celltype, scales = "free") +
+      labs(
+        title = paste0(title_prefix, m, " | ", input_assay, " vs raw_", m, " (r=", cor_raw, ")"),
+        x = input_assay, y = paste0("raw_", m)
+      ) + theme_Publication()
+
+    p2 <- ggplot(df, aes(x = ref, y = qn_val)) +
+      geom_point(alpha = 0.15, size = 0.3) +
+      facet_wrap(~ celltype, scales = "free") +
+      labs(
+        title = paste0(title_prefix, m, " | ", input_assay, " vs qn_", m, " (r=", cor_qn, ")"),
+        x = input_assay, y = paste0("qn_", m)
+      ) + theme_Publication()
+
+    p3 <- ggplot(df, aes(x = raw_val, y = qn_val)) +
+      geom_point(alpha = 0.15, size = 0.3) +
+      facet_wrap(~ celltype, scales = "free") +
+      labs(
+        title = paste0(title_prefix, m, " | raw_", m, " vs qn_", m, " (r=", cor_rq, ")"),
+        x = paste0("raw_", m), y = paste0("qn_", m)
+      ) + theme_Publication()
+
+    print(p1); print(p2); print(p3)
+    n_pages <- n_pages + 3L
+  }
+
+  if (n_pages == 0L) warning("No matching assay pairs found for correlation plots.")
+  message("  ✓ Saved metric correlation plots (", n_pages, " pages): ", outfile)
+  invisible(n_pages > 0L)
+}
+
+
 ###############################
 ## 6. Main CLEAR-from-overlaps runner
 ###############################
@@ -713,8 +884,8 @@ run_trait_from_overlap_library <- function(
     TRAIT_CODE,
     overlap_root   = file.path("output/CLEAR_OVERLAPS", paste0(TRAIT_CODE, "__hg38")),
     out_root       = file.path("output/CLEAR_FROM_OVERLAPS", paste0(TRAIT_CODE, "__hg38")),
-    rank_types     = c("spec_rank","comp1_rank","comp2_rank","tau_rank","compsc1_tau_rank","compsc2_tau_rank"),
-    spec_metric    = "l2_norm",
+    rank_types     = c("qn_l2_norm_rank","qn_comp1_rank","qn_comp2_rank","qn_tau_rank","qn_comp1_tau_rank","qn_comp2_tau_rank"),
+    spec_metric    = "qn_l2_norm",
     conc_threshold = 0.8,   # sum of L2^2 across the top-k cell types must exceed this
     max_k          = 4,     # check k = 1, 2, ..., max_k dominant cell types
     force          = FALSE
@@ -882,7 +1053,7 @@ run_trait_from_overlap_library <- function(
     }
     
     ## 3. Cell-type stacked bar plots for peaks with high specificity scores
-    stack_metrics <- c("l2_norm", "comp1", "comp2")
+    stack_metrics <- c("qn_l2_norm", "qn_comp1", "qn_comp2")
     for (vm in stack_metrics) {
       stack_pdf <- file.path(trait_dir, paste0(input_id, "_", vm, "_stackbars.pdf"))
       try(
@@ -901,8 +1072,19 @@ run_trait_from_overlap_library <- function(
     try(
       plot_peak_specificity_distribution(
         se           = se,
-        metric       = "l2_norm",
+        metric       = "qn_l2_norm",
         outfile      = spec_pdf,
+        title_prefix = paste0(input_id, " | ")
+      ),
+      silent = FALSE
+    )
+
+    ## 5. Metric correlation triplets (raw PeakMatrix vs raw_* vs qn_*)
+    corr_pdf <- file.path(trait_dir, paste0(input_id, "_metric_correlations.pdf"))
+    try(
+      plot_metric_correlations(
+        se           = se,
+        outfile      = corr_pdf,
         title_prefix = paste0(input_id, " | ")
       ),
       silent = FALSE
@@ -985,8 +1167,8 @@ run_trait_from_overlap_library(
   TRAIT_CODE     = TRAIT_CODE,
   overlap_root   = overlap_root,
   out_root       = out_root,
-  rank_types     = c("spec_rank","comp1_rank","comp2_rank"),
-  spec_metric    = "l2_norm",
+  rank_types     = c("qn_l2_norm_rank","qn_comp1_rank","qn_comp2_rank"),
+  spec_metric    = "qn_l2_norm",
   conc_threshold = 0.8,
   max_k          = 4,
   force          = TRUE
