@@ -1,4 +1,4 @@
-# Looping helpers to run compute_metrics_se (with quantile-norm, L2, covariance/correlation weighting) across multiple SummarizedExperiment objects.
+# Looping to run compute_metrics_se (with quantile-norm, L2, covariance/correlation weighting) across multiple SummarizedExperiment objects.
 
 suppressPackageStartupMessages({
   library(SummarizedExperiment)
@@ -6,6 +6,8 @@ suppressPackageStartupMessages({
   library(preprocessCore)
   library(corpcor)
   library(GenomicRanges)
+  library(ggplot2)
+  library(tidyr)
 })
 
   # Defaults (override at call-site as needed)
@@ -15,6 +17,24 @@ suppressPackageStartupMessages({
   DEFAULT_L2_MID_THRESHOLD    <- NULL
   DEFAULT_COV_HIGH_QUANTILE   <- 0.9
   DEFAULT_COV_MID_QUANTILE    <- 0.5
+
+# -------- Input registries (name -> path to RDS) --------
+SE_INPUTS <- c(
+  union_peak                    = "data/PeakCalls_Xiong/union_GRSE.rds",
+  breast_final_union_331832     = "/working/lab_jonathb/lefeiW/projects/CLEAR_breast_demo/results/union_peak331832_CLEAR_se.rds",
+  breast_final_union_531279     = "/working/lab_jonathb/lefeiW/projects/CLEAR_breast_demo/results/union_peak531279_CLEAR_se.rds",
+  merged                        = "data/merged_peakMatrix_perBP_normalised.rds",
+  pbmc10k                       = "/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/processed/pbmc10k_CLEAR_ready.se.rds",
+  hten_dcis                     = "/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/processed/hten_dcis.rds",
+  zhang2021_mammary             = "output/Zhang2021_mammary.hg38.rds",
+  zhang2021_mammary_ArchR       = "/working/lab_jonathb/lefeiW/projects/ATAC_BCAC/output/snATAC_SE_library/zhang2021_mammary/zhang2021_mammary_ArchR_se.rds"
+)
+
+TRAIT_INPUTS <- c(
+  bcac_overall_opentarget      = "data/opentarget_trait/breast_carcinoma_2017_michailidou_cs210__GCST004988/breast_carcinoma_2017_michailidou_cs210__GCST004988_CLEAR_credible_set_variants.gr.rds",
+  bcac_overall_FM_Fachal_2020  = "data/BCAC_FM_GR.rds",
+  t1d_santiago                 = "data/opentarget_trait/working/t1d_santiago.rds"
+)
 
 safe_l2 <- function(x) {
   s <- sum(x^2)
@@ -34,8 +54,7 @@ ensure_peakids <- function(se) {
 }
 
 #### Full metrics (L2, cov/cor weighted, QN, ranks) for one SE  (added QN and keep thinking about the composite) ####
-compute_metrics_se <- function(se, assay_name = NULL, keep_top_prop = NULL) {
-  stopifnot(inherits(se, "SummarizedExperiment"))
+compute_metrics_se <- function(se, assay_name = NULL, keep_top_prop = NULL) { # 0.1
   if (is.null(assay_name)) assay_name <- assayNames(se)[1] # should be the raw PeakMatrix assay
 
   mat <- assay(se, assay_name)
@@ -48,7 +67,7 @@ compute_metrics_se <- function(se, assay_name = NULL, keep_top_prop = NULL) {
 
   row_sums <- rowSums(mat)
   if (!is.null(keep_top_prop)) {
-    thr  <- stats::quantile(row_sums, probs = 1 - keep_top_prop, na.rm = TRUE)
+    thr  <- stats::quantile(row_sums, probs = 1 - keep_top_prop, na.rm = TRUE) 
     keep <- row_sums > thr
     se  <- se[keep, , drop = FALSE]
     mat <- mat[keep, , drop = FALSE]
@@ -112,9 +131,115 @@ compute_metrics_se <- function(se, assay_name = NULL, keep_top_prop = NULL) {
   se
 }
 
-process_se_list_metrics <- function(se_list, assay_name = NULL, keep_top_prop = NULL) {
-  lapply(se_list, function(se) compute_metrics_se(se, assay_name = assay_name, keep_top_prop = keep_top_prop, save_processed = FALSE, out_dir = file.path("data", "processed_se")))
+process_se_list_metrics <- function(se_list, assay_name = NULL, keep_top_prop = NULL,
+                                    out_dir = file.path("data", "processed_se"),
+                                    plot_dir = "plots") {
+  if (is.null(names(se_list))) names(se_list) <- paste0("se", seq_along(se_list))
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+  res <- lapply(names(se_list), function(nm) {
+    message("\n===== Processing: ", nm, " =====")
+    se_proc <- compute_metrics_se(se_list[[nm]], assay_name = assay_name, keep_top_prop = keep_top_prop)
+    fname <- paste0(nm, "_", ncol(se_proc), "ct_", nrow(se_proc), "peaks_processed.rds")
+    saveRDS(se_proc, file.path(out_dir, fname))
+    message("Saved: ", file.path(out_dir, fname))
+    # First-line validation plots
+    plot_assay_cor_heatmaps(se_proc, nm, plot_dir = plot_dir)
+    plot_assay_densities(se_proc, nm, plot_dir = plot_dir)
+    se_proc
+  })
+  names(res) <- names(se_list)
+  res
 }
+
+overlap_se_with_snps <- function(se, snps, assay_name, tissue, trait,
+                                  out_dir = file.path("data", "GWAS_overlapped_se")) {
+  if (!assay_name %in% assayNames(se)) stop("Assay ", assay_name, " not found in SE")
+  se <- ensure_peakids(se)
+  ov <- findOverlaps(se, snps, ignore.strand = TRUE)
+  if (!length(ov)) {
+    message("No overlaps for ", tissue, " x ", trait)
+    return(list(se_overlap = se[0, ], mat = matrix(0, 0, ncol(se))))
+  }
+  hit_rows <- sort(unique(queryHits(ov)))
+  se_sub <- se[hit_rows, , drop = FALSE]
+
+  # Annotate each overlapped peak with its SNP IDs and GWAS signals
+  snp_list  <- tapply(mcols(snps)$names[subjectHits(ov)],  queryHits(ov), paste, collapse = ",")
+  locus_vec <- tapply(mcols(snps)$signal[subjectHits(ov)], queryHits(ov),
+                      function(x) paste(unique(x), collapse = ","))
+  rowData(se_sub)$overlap_snps    <- snp_list[as.character(hit_rows)]
+  rowData(se_sub)$overlap_signals <- locus_vec[as.character(hit_rows)]
+
+  mat <- SummarizedExperiment::assay(se_sub, assay_name)
+  if (inherits(mat, "Matrix")) mat <- as.matrix(mat)
+
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  fname <- paste0(tissue, "_", ncol(se_sub), "ct_", trait, "_", nrow(se_sub), "peaks_overlapped.rds") # naming: tissue, trait, n peaks, n cell types
+  saveRDS(se_sub, file.path(out_dir, fname))
+  message("Saved: ", file.path(out_dir, fname))
+
+  list(se_overlap = se_sub, mat = mat)
+}
+
+# ---------- Assays to plot (skip ranks) ----------
+PLOT_ASSAYS <- c("raw", "qn", "raw_l2", "qn_l2",
+                 "cov_raw", "cov_qn", "cov_raw_l2", "cov_qn_l2",
+                 "cor_raw", "cor_qn", "cor_raw_l2", "cor_qn_l2")
+
+# Correlation heatmaps — one PDF per assay, saved under plots/{tissue}/
+plot_assay_cor_heatmaps <- function(se, tissue, plot_dir = "plots") {
+  out <- file.path(plot_dir, tissue)
+  dir.create(out, recursive = TRUE, showWarnings = FALSE)
+  avail <- intersect(PLOT_ASSAYS, assayNames(se))
+  for (a in avail) {
+    mat <- assay(se, a)
+    if (inherits(mat, "Matrix")) mat <- as.matrix(mat)
+    fname <- file.path(out, paste0(tissue, "_", a, "_cor_heatmap.pdf"))
+    pdf(fname, width = 8, height = 7)
+    heatmap(cor(mat), main = paste0(tissue, " \u2014 ", a, " correlation"),
+            margins = c(10, 10))
+    dev.off()
+    message("Saved: ", fname)
+  }
+  invisible(out)
+}
+
+# Density plots — one PDF with faceted panels per assay
+plot_assay_densities <- function(se, tissue, plot_dir = "plots") {
+  out <- file.path(plot_dir, tissue)
+  dir.create(out, recursive = TRUE, showWarnings = FALSE)
+  avail <- intersect(PLOT_ASSAYS, assayNames(se))
+  long_list <- lapply(avail, function(a) {
+    mat <- assay(se, a)
+    if (inherits(mat, "Matrix")) mat <- as.matrix(mat)
+    df <- as.data.frame(mat)
+    df <- tidyr::pivot_longer(df, cols = everything(),
+                              names_to = "cell_type", values_to = "value")
+    df$assay <- a
+    df
+  })
+  long <- do.call(rbind, long_list)
+  long$assay <- factor(long$assay, levels = avail)
+  p <- ggplot(long, aes(x = value, colour = cell_type)) +
+    geom_density() +
+    facet_wrap(~ assay, scales = "free", ncol = 4) +
+    theme_bw() +
+    theme(legend.position = "bottom",
+          strip.text = element_text(size = 9)) +
+    labs(title = paste0(tissue, " \u2014 per-cell-type distributions"),
+         x = "Value", y = "Density", colour = "Cell type")
+  fname <- file.path(out, paste0(tissue, "_assay_densities.pdf"))
+  ggsave(fname, p, width = 16, height = 12)
+  message("Saved: ", fname)
+  invisible(fname)
+}
+
+
+# ---------- Assays for dominance / specificity ----------
+L2_ASSAYS  <- c("raw_l2", "qn_l2")
+COV_ASSAYS <- c("cov_raw", "cov_qn", "cov_raw_l2", "cov_qn_l2")
+COR_ASSAYS <- c("cor_raw", "cor_qn", "cor_raw_l2", "cor_qn_l2")
 
 #### dominance of top cell type as 2 times the second ####
 compute_dominance <- function(mat, ratio_thresh = DEFAULT_RATIO_THRESH) {
@@ -196,104 +321,86 @@ specificity_counts_quantile <- function(mat, cov_high_quantile = DEFAULT_COV_HIG
   )
 }
 
-overlap_se_with_snps <- function(se, snps, assay_name) {
-  overlap_se_with_snps <- function(se, snps, assay_name, save_overlap = FALSE, tissue = NULL, trait = NULL, out_dir = file.path("data", "GWAS_overlapped_se")) {
-  stopifnot(inherits(se, "SummarizedExperiment"))
-  stopifnot(inherits(snps, "GenomicRanges"))
-  if (!assay_name %in% assayNames(se)) stop("Assay ", assay_name, " not found in SE")
-  se <- ensure_peakids(se)
-  ov <- findOverlaps(se, snps, ignore.strand = TRUE)
-  if (!length(ov)) return(list(se_overlap = se[0, ], mat = matrix(0, 0, ncol(se))))
-  hit_rows <- sort(unique(queryHits(ov)))
-  se_sub <- se[hit_rows, , drop = FALSE]
-  # add SNP IDs and signals per overlapped peak
-  snp_ids <- mcols(snps)$names
-  snp_signals <- mcols(snps)$signal
-  snp_list <- tapply(snp_ids[subjectHits(ov)], queryHits(ov), paste, collapse = ",")
-  locus_vec <- tapply(snp_signals[subjectHits(ov)], queryHits(ov), function(x) paste(unique(x), collapse = ", "))
-  rowData(se_sub)$overlap_snps <- snp_list[as.character(seq_along(se))[hit_rows]]
-  rowData(se_sub)$overlap_signals <- locus_vec[as.character(seq_along(se))[hit_rows]]
-  mat <- SummarizedExperiment::assay(se_sub, assay_name)
-  if (inherits(mat, "Matrix")) mat <- as.matrix(mat)
-  save_path <- NULL
-  if (save_overlap) {
-    if (is.null(tissue)) stop("tissue is required when save_overlap = TRUE")
-    if (is.null(trait))  stop("trait is required when save_overlap = TRUE")
-    dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-    n_ct <- ncol(se_sub)
-    n_pk <- nrow(se_sub)
-    fname <- paste0(tissue, "_", n_ct, "ct_", trait, "_", n_pk, "peaks_overlapped.rds")
-    save_path <- file.path(out_dir, fname)
-    saveRDS(se_sub, save_path)
+
+# ---- Run dominance / specificity on one SE across its assays, save to out_dir ----
+compute_se_summaries <- function(se, out_dir,
+                                 l2_assays  = L2_ASSAYS,
+                                 cov_assays = c(COV_ASSAYS, COR_ASSAYS),
+                                 ratio_thresh = DEFAULT_RATIO_THRESH,
+                                 threshold_sq = DEFAULT_SPEC_THRESHOLD_SQ,
+                                 l2_high_thresh = DEFAULT_L2_HIGH_THRESHOLD,
+                                 l2_mid_thresh  = DEFAULT_L2_MID_THRESHOLD,
+                                 cov_high_quantile = DEFAULT_COV_HIGH_QUANTILE,
+                                 cov_mid_quantile  = DEFAULT_COV_MID_QUANTILE) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  results <- list()
+
+  # L2 assays: dominance + specificity_summary + specificity_counts_l2
+  for (a in intersect(l2_assays, assayNames(se))) {
+    mat <- assay(se, a)
+    if (inherits(mat, "Matrix")) mat <- as.matrix(mat)
+    dom  <- compute_dominance(mat, ratio_thresh)
+    spec <- compute_specificity_summary(mat, ratio_thresh = ratio_thresh, threshold_sq = threshold_sq)
+    cnt  <- specificity_counts_l2(mat, l2_high_thresh = l2_high_thresh, l2_mid_thresh = l2_mid_thresh)
+    saveRDS(dom,  file.path(out_dir, paste0("dominance_", a, ".rds")))
+    saveRDS(spec, file.path(out_dir, paste0("specificity_summary_", a, ".rds")))
+    saveRDS(cnt,  file.path(out_dir, paste0("specificity_counts_", a, ".rds")))
+    results[[a]] <- list(dominance = dom, specificity_summary = spec, specificity_counts = cnt)
+    message("  Saved dominance + specificity for ", a)
   }
-  list(se_overlap = se_sub, mat = mat, save_path = save_path)
+
+  # Cov/Cor assays: dominance + specificity_counts_quantile
+  for (a in intersect(cov_assays, assayNames(se))) {
+    mat <- assay(se, a)
+    if (inherits(mat, "Matrix")) mat <- as.matrix(mat)
+    dom  <- compute_dominance(mat, ratio_thresh)
+    cnt  <- specificity_counts_quantile(mat, cov_high_quantile = cov_high_quantile, cov_mid_quantile = cov_mid_quantile)
+    saveRDS(dom, file.path(out_dir, paste0("dominance_", a, ".rds")))
+    saveRDS(cnt, file.path(out_dir, paste0("specificity_counts_", a, ".rds")))
+    results[[a]] <- list(dominance = dom, specificity_counts = cnt)
+    message("  Saved dominance + specificity for ", a)
+  }
+
+  invisible(results)
 }
 
-# Pairwise loop: all SEs x all SNP trait sets; returns nested list
-process_se_trait_pairs <- function(
-    se_list,
-    trait_list,
-    metric_assays = c("qn_l2"),
-    cov_metric_assays = c("cov_qn_l2"),
-  dominance_ratio_thresh = DEFAULT_RATIO_THRESH,
-  l2_high_threshold = DEFAULT_L2_HIGH_THRESHOLD,
-  l2_mid_threshold  = DEFAULT_L2_MID_THRESHOLD,
-  cov_high_quantile = DEFAULT_COV_HIGH_QUANTILE,
-  cov_mid_quantile  = DEFAULT_COV_MID_QUANTILE,
-  specificity_threshold_sq = DEFAULT_SPEC_THRESHOLD_SQ
-) {
-  if (is.null(names(se_list))) names(se_list) <- paste0("se", seq_along(se_list))
-  if (is.null(names(trait_list))) names(trait_list) <- paste0("trait", seq_along(trait_list))
+# Step 6 — Dominance / specificity on full processed SEs
+#   results/{tissue}/full/dominance_{assay}.rds, specificity_*_{assay}.rds
+run_full_summaries <- function(se_proc_list, results_dir = "results", ...) {
+  message("\n====== Step 6: Full-matrix summaries ======")
+  if (is.null(names(se_proc_list))) names(se_proc_list) <- paste0("se", seq_along(se_proc_list))
 
-  lapply(names(se_list), function(se_nm) {
-    se_obj <- se_list[[se_nm]]
-    lapply(names(trait_list), function(trait_nm) {
-      snps <- trait_list[[trait_nm]]
-
-      metric_results <- lapply(metric_assays, function(metric_assay) {
-        ov <- overlap_se_with_snps(se_obj, snps, assay_name = metric_assay)
-        mat_l2 <- ov$mat
-        if (nrow(mat_l2) == 0) {
-          return(list(
-            metric = metric_assay,
-            overlap_n = 0,
-            spec_basic = NULL,
-            dominance  = NULL,
-            spec_summary = NULL,
-            spec_cov = NULL
-          ))
-        }
-
-        spec_basic <- specificity_counts_l2(mat_l2, l2_high_thresh = l2_high_threshold, l2_mid_thresh = l2_mid_threshold)
-        dominance  <- compute_dominance(mat_l2, ratio_thresh = dominance_ratio_thresh)
-        spec_summary <- compute_specificity_summary(mat_l2, ratio_thresh = dominance_ratio_thresh, threshold_sq = specificity_threshold_sq)
-
-        spec_cov <- NULL
-        hits_cov <- cov_metric_assays[cov_metric_assays %in% assayNames(ov$se_overlap)]
-        if (length(hits_cov)) {
-          spec_cov <- lapply(hits_cov, function(cov_assay) {
-            mat_cov <- SummarizedExperiment::assay(ov$se_overlap, cov_assay)
-            if (inherits(mat_cov, "Matrix")) mat_cov <- as.matrix(mat_cov)
-            list(
-              cov_assay = cov_assay,
-              spec_quantile = specificity_counts_quantile(mat_cov, cov_high_quantile = cov_high_quantile, cov_mid_quantile = cov_mid_quantile)
-            )
-          })
-        }
-
-        list(
-          metric = metric_assay,
-          overlap_n = nrow(ov$se_overlap),
-          spec_basic = spec_basic,
-          dominance  = dominance,
-          spec_summary = spec_summary,
-          spec_cov = spec_cov
-        )
-      })
-
-      list(se_name = se_nm, trait = trait_nm, metrics = metric_results)
-    })
+  out <- lapply(names(se_proc_list), function(tissue) {
+    message("\n--- ", tissue, " (full) ---")
+    od <- file.path(results_dir, tissue, "full")
+    compute_se_summaries(se_proc_list[[tissue]], out_dir = od, ...)
   })
+  names(out) <- names(se_proc_list)
+  invisible(out)
+}
+
+# Step 7 — Dominance / specificity on GWAS-overlapped SEs
+#   results/{tissue}/{trait}/dominance_{assay}.rds, specificity_*_{assay}.rds
+run_gwas_summaries <- function(overlap_results, results_dir = "results", ...) {
+  message("\n====== Step 7: GWAS-overlap summaries ======")
+
+  out <- lapply(names(overlap_results), function(tissue) {
+    inner <- overlap_results[[tissue]]
+    trait_out <- lapply(names(inner), function(trait) {
+      ov <- inner[[trait]]
+      if (nrow(ov$se_overlap) == 0) {
+        message("\n  Skipping ", tissue, " x ", trait, " (0 overlaps)")
+        return(NULL)
+      }
+      message("\n--- ", tissue, " x ", trait, " ---")
+      od <- file.path(results_dir, tissue, trait)
+      compute_se_summaries(ov$se_overlap, out_dir = od, ...)
+    })
+    names(trait_out) <- names(inner)
+    trait_out
+  })
+  names(out) <- names(overlap_results)
+  invisible(out)
 }
 
 # Dominance plot comparing Full vs GWAS-overlap matrices
@@ -316,26 +423,134 @@ plot_dominance_full_vs_gwas <- function(full_mat, gwas_mat, ratio_thresh = DEFAU
     coord_flip()
 }
 
-# -------- IO helpers for processed and overlapped SEs --------
-save_processed_se <- function(se, tissue, out_dir = file.path("data", "processed_se")) {
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  n_ct <- ncol(se)
-  n_pk <- nrow(se)
-  fname <- paste0(tissue, "_", n_ct, "ct_", n_pk, "peaks_processed.rds")
-  path <- file.path(out_dir, fname)
-  saveRDS(se, path)
-  path
+# ============================================================
+# Pipeline steps — run one at a time
+# ============================================================
+#
+# Step 1: load_se_inputs()          — read SE RDS files into a named list
+# Step 2: process_se_list_metrics() — compute all metrics, save & plot
+# Step 3: load_trait_inputs()       — read trait GR RDS files into a named list
+# Step 4: overlap_all_se_traits()   — overlap every processed SE x every trait, save & plot
+# Step 5: summarize_inputs()        — build summary tables of what we have
+# Step 6: run_full_summaries()      — dominance/specificity on full processed SEs
+# Step 7: run_gwas_summaries()      — dominance/specificity on GWAS-overlapped SEs
+#
+# Directory structure:
+#   data/processed_se/          — processed full SEs (from Step 2)
+#   data/GWAS_overlapped_se/    — GWAS-overlapped SEs (from Step 4)
+#   plots/{tissue}/             — heatmaps + density plots (from Steps 2 & 4)
+#   results/{tissue}/full/      — dominance + specificity results (from Step 6)
+#   results/{tissue}/{trait}/   — dominance + specificity results (from Step 7)
+#
+# Typical usage:
+#   se_list      <- load_se_inputs()
+#   se_proc_list <- process_se_list_metrics(se_list)
+#   trait_list   <- load_trait_inputs()
+#   overlaps     <- overlap_all_se_traits(se_proc_list, trait_list)
+#   summary      <- summarize_inputs(se_proc_list, trait_list, overlaps)
+#   full_res     <- run_full_summaries(se_proc_list)
+#   gwas_res     <- run_gwas_summaries(overlaps)
+
+# Step 1 — Load SEs from registry
+load_se_inputs <- function(se_inputs = SE_INPUTS) {
+  message("\n====== Step 1: Loading SEs ======")
+  se_list <- lapply(names(se_inputs), function(nm) {
+    message("  Loading: ", nm, " <- ", se_inputs[[nm]])
+    readRDS(se_inputs[[nm]])
+  })
+  names(se_list) <- names(se_inputs)
+  message("  Loaded ", length(se_list), " SEs: ", paste(names(se_list), collapse = ", "))
+  se_list
 }
 
-save_overlap_se <- function(se_overlap, tissue, trait, out_dir = file.path("data", "GWAS_overlapped_se")) {
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  n_ct <- ncol(se_overlap)
-  n_pk <- nrow(se_overlap)
-  fname <- paste0(tissue, "_", n_ct, "ct_", trait, "_", n_pk, "peaks_overlapped.rds")
-  path <- file.path(out_dir, fname)
-  saveRDS(se_overlap, path)
-  path
+# Step 2 is process_se_list_metrics() defined above
+# — computes metrics, saves to data/processed_se/, plots heatmaps + densities
+
+# Step 3 — Load trait GRs from registry
+load_trait_inputs <- function(trait_inputs = TRAIT_INPUTS) {
+  message("\n====== Step 3: Loading traits ======")
+  trait_list <- lapply(names(trait_inputs), function(nm) {
+    message("  Loading: ", nm, " <- ", trait_inputs[[nm]])
+    readRDS(trait_inputs[[nm]])
+  })
+  names(trait_list) <- names(trait_inputs)
+  message("  Loaded ", length(trait_list), " traits: ", paste(names(trait_list), collapse = ", "))
+  trait_list
 }
+
+# Step 4 — Overlap every processed SE x every trait (saves + plots)
+overlap_all_se_traits <- function(se_proc_list, trait_list,
+                                  overlap_assay = "qn_l2",
+                                  plot_dir = "plots") {
+  message("\n====== Step 4: Overlapping SE x trait ======")
+  if (is.null(names(se_proc_list))) names(se_proc_list) <- paste0("se", seq_along(se_proc_list))
+  if (is.null(names(trait_list)))   names(trait_list)   <- paste0("trait", seq_along(trait_list))
+
+  overlap_results <- lapply(names(se_proc_list), function(tissue) {
+    se <- se_proc_list[[tissue]]
+    inner <- lapply(names(trait_list), function(trait) {
+      message("\n  --- ", tissue, " x ", trait, " ---")
+      ov <- overlap_se_with_snps(se, trait_list[[trait]],
+                                 assay_name = overlap_assay,
+                                 tissue = tissue, trait = trait)
+      if (nrow(ov$se_overlap) > 0) {
+        ov_label <- paste0(tissue, "_", trait)
+        plot_assay_cor_heatmaps(ov$se_overlap, ov_label, plot_dir = plot_dir)
+        plot_assay_densities(ov$se_overlap, ov_label, plot_dir = plot_dir)
+      }
+      ov
+    })
+    names(inner) <- names(trait_list)
+    inner
+  })
+  names(overlap_results) <- names(se_proc_list)
+  overlap_results
+}
+
+# Step 5 — Summarise what we have
+summarize_inputs <- function(se_proc_list, trait_list = NULL, overlap_results = NULL) {
+  message("\n====== Step 5: Input summary ======")
+
+  se_summary <- data.frame(
+    tissue      = names(se_proc_list),
+    n_celltypes = sapply(se_proc_list, ncol),
+    n_peaks     = sapply(se_proc_list, nrow),
+    stringsAsFactors = FALSE
+  )
+
+  if (!is.null(trait_list)) {
+    trait_summary <- data.frame(
+      trait  = names(trait_list),
+      n_snps = sapply(trait_list, length),
+      stringsAsFactors = FALSE
+    )
+  } else {
+    trait_summary <- NULL
+  }
+
+  if (!is.null(overlap_results)) {
+    ov_rows <- do.call(rbind, lapply(names(overlap_results), function(tissue) {
+      inner <- overlap_results[[tissue]]
+      do.call(rbind, lapply(names(inner), function(trait) {
+        data.frame(tissue = tissue, trait = trait,
+                   n_overlapped = nrow(inner[[trait]]$se_overlap),
+                   stringsAsFactors = FALSE)
+      }))
+    }))
+  } else {
+    ov_rows <- NULL
+  }
+
+  message("\n-- SE datasets --")
+  print(se_summary)
+  if (!is.null(trait_summary)) { message("\n-- Traits --"); print(trait_summary) }
+  if (!is.null(ov_rows))       { message("\n-- Overlaps --"); print(ov_rows) }
+
+  invisible(list(se_summary = se_summary, trait_summary = trait_summary,
+                 overlap_summary = ov_rows))
+}
+
+
 
 
 
