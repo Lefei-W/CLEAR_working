@@ -6,7 +6,7 @@ WD=/working/lab_jonathb/lefeiW/projects/CLEAR_2026
 SD=${WD}/jobs
 OD=${WD}/output
 RSCRIPT=${WD}/R/run_clear_pair_locus.R
-GTF=${WD}/CLEAR_data/gencode.v46.chr_patch_hapl_scaff.basic.annotation.gtf.gz
+GTF=/working/lab_jonathb/lefeiW/projects/CLEAR_data/gencode.v46.chr_patch_hapl_scaff.basic.annotation.gtf.gz
 NPERM=100
 KLINEAGE=4
 
@@ -37,6 +37,7 @@ TRAIT_INPUTS=(
   "JT_interval|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/JT_interval_CLEAR.gr.rds"
   "height|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/height_finngen_cs1903__FINNGEN_R12_HEIGHT_IRN_CLEAR_credible_set_variants.gr.rds"
   "mammographic_density_nondensearea|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/mammographic_density_nondensearea_2020_sieh_cs11__GCST90011732_CLEAR_credible_set_variants.gr.rds"
+  "mammographic_density_densearea|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/mammographic_density_densearea_2020_sieh_cs10__GCST90011731_CLEAR_credible_set_variants.gr.rds"
   "monocyte_counts|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/monocyte_count_2020_chen_cs374__GCST90002344_CLEAR_credible_set_variants.gr.rds"
   "platelet_counts|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/platelet_count_2020_chen_cs1514__GCST90002357_CLEAR_credible_set_variants.gr.rds"
   "ovarian_cancer|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/ovarian_cancer_2022_dareng_cs27__GCST90016665_CLEAR_credible_set_variants.gr.rds"
@@ -44,6 +45,15 @@ TRAIT_INPUTS=(
   "colorectal_cancer|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/colorectal_cancer_2024_tian_2024_cs70__GCST90435268_CLEAR_credible_set_variants.gr.rds"
   "brain_cancer|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/brain_cancer_2024_verma_cs84__GCST90479812_CLEAR_credible_set_variants.gr.rds"
   "alzheimers|/working/joint_projects/bc_risk_locus_multiomics/bc_risk_locus_funcannotation/openTargets_traits/alzheimer_2022_bellenguez_cs83__GCST90027158_CLEAR_credible_set_variants.gr.rds"
+  "DCIS|/mnt/lustre/working/lab_jonathb/lefeiW/projects/ATAC_BCAC/data/opentarget_trait/dcis_2023_kurki_cs8__FINNGEN_R12_CD2_INSITU_BREAST_INTRADUCTAL_EXALLC/dcis_2023_kurki_cs8__FINNGEN_R12_CD2_INSITU_BREAST_INTRADUCTAL_EXALLC_CLEAR_credible_set_variants.gr.rds"
+  "BCAC_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/BCAC_FineMapping.rds" 
+  "LumA_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/LumA_FineMapping.rds"
+  "LumB_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/LumB_FineMapping.rds"
+  "LumB_HER2Neg_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/LumB_HER2Neg_FineMapping.rds"
+  "CIMBA_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/CIMBA_FineMapping.rds"
+  "HER2_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/HER2_FineMapping.rds"
+  "TripleNeg_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/TripleNeg_FineMapping.rds"
+
 )
 
 # ---- Loop over all SE x trait pairs ----
