@@ -68,20 +68,33 @@ for (d in c(results_dir, plots_dir, data_dir)) {
 # ---------------------------
 prepare_clear_se <- function(se, genome = "hg38") {
   rd <- as.data.frame(rowData(se))
-  
-  # Build GRanges from rowData (ArchR groupSE always has seqnames/start/end)
-  if (!all(c("seqnames", "start", "end") %in% names(rd))) {
-    stop("rowData must contain seqnames, start, end columns (ArchR PeakMatrix format expected)") # Check what Signac does
+
+  has_rowdata_coords <- all(c("seqnames", "start", "end") %in% names(rd))
+
+  if (has_rowdata_coords) {
+    # ArchR-style object: coordinates stored in rowData columns.
+    gr <- GRanges(
+      seqnames = rd$seqnames,
+      ranges   = IRanges::IRanges(start = as.integer(rd$start), end = as.integer(rd$end))
+    )
+
+    extra_cols <- setdiff(names(rd), c("seqnames", "start", "end", "width", "strand"))
+    if (length(extra_cols)) mcols(gr) <- rd[, extra_cols, drop = FALSE]
+  } else if (inherits(rowRanges(se), "GenomicRanges")) {
+    # Some inputs keep genomic coordinates only in rowRanges.
+    gr <- rowRanges(se)
+    if (ncol(rd) > 0) {
+      for (nm in names(rd)) {
+        if (!nm %in% names(mcols(gr))) {
+          mcols(gr)[[nm]] <- rd[[nm]]
+        }
+      }
+    }
+  } else {
+    stop(
+      "Input SE has no usable genomic coordinates. Provide either rowData seqnames/start/end or a valid rowRanges(se)."
+    )
   }
-  
-  gr <- GRanges(
-    seqnames = rd$seqnames,
-    ranges   = IRanges::IRanges(start = as.integer(rd$start), end = as.integer(rd$end))
-  )
-  
-  # Keep rowData columns 
-  extra_cols <- setdiff(names(rd), c("seqnames", "start", "end", "width", "strand"))
-  if (length(extra_cols)) mcols(gr) <- rd[, extra_cols, drop = FALSE]
   
   # Rebuild as RSE
   se <- SummarizedExperiment(
@@ -532,11 +545,13 @@ make_density_bins <- function(density_vec, nbins = 4) {
   )
 }
 
-compute_locus_rank_concordance_vec <- function(
+peak_to_locus <- setNames(as.character(rowData(se_gwas)$signal), rownames(se_gwas))
+
+compute_locus_rank_concordance_vec <- function( # Whether peaks in the same GWAS locus show more silimar cell type ranking patterns 
     gwas_mat,
     full_mat,
-    peak_to_locus,
-    joint_bin_full,
+    peak_to_locus, # signal vector 
+    joint_bin_full, # density bin and TSS distance
     cell_lineage,
     n_perm = 100) {
 
@@ -650,6 +665,65 @@ compute_locus_rank_concordance_vec <- function(
   })
 
   do.call(rbind, results)
+}
+
+addLocusCoherence <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, k_lineage, n_perm, results_dir) {
+  if (!nrow(gwas_mat)) return(data.frame())
+  if (!file.exists(gtf_path)) {
+    message("  Skipping locus analysis: GTF file not found at ", gtf_path)
+    return(data.frame())
+  }
+
+  gtf <- rtracklayer::import(gtf_path)
+  tss_gr <- get_tss(gtf)
+
+  peaks_gr <- rowRanges(se)
+  nearest_hits <- distanceToNearest(peaks_gr, tss_gr)
+  dist2tss <- mcols(nearest_hits)$distance
+
+  tss_bin <- cut(
+    dist2tss,
+    breaks = c(0, 1000, 5000, 50000, 200000, Inf),
+    labels = c("core_prom", "prox_prom", "near_reg", "distal", "long_range"),
+    include.lowest = TRUE
+  )
+  names(tss_bin) <- rownames(mat_l2)
+
+  density <- compute_peak_density(rowRanges(se))
+  density_bin <- make_density_bins(density)
+  names(density_bin) <- rownames(mat_l2)
+
+  joint_bin_full <- interaction(tss_bin, density_bin, drop = TRUE)
+  joint_bin_full <- as.character(joint_bin_full)
+  names(joint_bin_full) <- names(tss_bin)
+
+  cell_cor <- cor(mat_l2, method = "pearson")
+  hc <- hclust(as.dist(1 - cell_cor), method = "average")
+  cell_lineage <- cutree(hc, k = k_lineage)
+
+
+  locus_results <- compute_locus_rank_concordance_vec(
+    gwas_mat = gwas_mat,
+    full_mat = mat_l2,
+    peak_to_locus = peak_to_locus,
+    joint_bin_full = joint_bin_full,
+    cell_lineage = cell_lineage,
+    n_perm = n_perm
+  )
+
+  if (!nrow(locus_results)) return(data.frame())
+
+  locus_results$significant <- locus_results$p_value < 0.05
+  locus_results$category <- dplyr::case_when(
+    locus_results$n_peaks == 1 ~ "Single_peak",
+    locus_results$z_score > 2 & locus_results$p_value < 0.05 & locus_results$dominant_score_locus > 0.5 ~ "Highly_coherent_specific",
+    locus_results$z_score > 2 & locus_results$p_value < 0.05 ~ "Coherent_moderate",
+    locus_results$z_score < 1 ~ "Incoherent",
+    TRUE ~ "Intermediate"
+  )
+
+  write.table(locus_results, file.path(results_dir, "locus_concordance_permutation.txt"), sep = "\t", quote = FALSE, row.names = FALSE)
+  locus_results
 }
 
 add_gwas_peak_annotation <- function(summary_df, snps) {
@@ -889,65 +963,6 @@ plot_coherence <- function(locus_results, se_name, trait_name, plots_dir) {
   invisible(p_locus_cat)
 }
 
-addLocusCoherence <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, k_lineage, n_perm, results_dir) {
-  if (!nrow(gwas_mat)) return(data.frame())
-  if (!file.exists(gtf_path)) {
-    message("  Skipping locus analysis: GTF file not found at ", gtf_path)
-    return(data.frame())
-  }
-
-  gtf <- rtracklayer::import(gtf_path)
-  tss_gr <- get_tss(gtf)
-
-  peaks_gr <- rowRanges(se)
-  nearest_hits <- distanceToNearest(peaks_gr, tss_gr)
-  dist2tss <- mcols(nearest_hits)$distance
-
-  tss_bin <- cut(
-    dist2tss,
-    breaks = c(0, 1000, 5000, 50000, 200000, Inf),
-    labels = c("core_prom", "prox_prom", "near_reg", "distal", "long_range"),
-    include.lowest = TRUE
-  )
-  names(tss_bin) <- rownames(mat_l2)
-
-  density <- compute_peak_density(rowRanges(se))
-  density_bin <- make_density_bins(density)
-  names(density_bin) <- rownames(mat_l2)
-
-  joint_bin_full <- interaction(tss_bin, density_bin, drop = TRUE)
-  joint_bin_full <- as.character(joint_bin_full)
-  names(joint_bin_full) <- names(tss_bin)
-
-  cell_cor <- cor(mat_l2, method = "pearson")
-  hc <- hclust(as.dist(1 - cell_cor), method = "average")
-  cell_lineage <- cutree(hc, k = k_lineage)
-
-  peak_to_locus <- setNames(as.character(rowData(se_gwas)$signal), rownames(se_gwas))
-
-  locus_results <- compute_locus_rank_concordance_vec(
-    gwas_mat = gwas_mat,
-    full_mat = mat_l2,
-    peak_to_locus = peak_to_locus,
-    joint_bin_full = joint_bin_full,
-    cell_lineage = cell_lineage,
-    n_perm = n_perm
-  )
-
-  if (!nrow(locus_results)) return(data.frame())
-
-  locus_results$significant <- locus_results$p_value < 0.05
-  locus_results$category <- dplyr::case_when(
-    locus_results$n_peaks == 1 ~ "Single_peak",
-    locus_results$z_score > 2 & locus_results$p_value < 0.05 & locus_results$dominant_score_locus > 0.5 ~ "Highly_coherent_specific",
-    locus_results$z_score > 2 & locus_results$p_value < 0.05 ~ "Coherent_moderate",
-    locus_results$z_score < 1 ~ "Incoherent",
-    TRUE ~ "Intermediate"
-  )
-
-  write.table(locus_results, file.path(results_dir, "locus_concordance_permutation.txt"), sep = "\t", quote = FALSE, row.names = FALSE)
-  locus_results
-}
 
 addGlobalEnrichment <- function(se, snps, mat_l2, results_dir, plots_dir, se_name, trait_name) {
   nmat_r <- apply(mat_l2, 2, function(x) rank(x, ties.method = "min"))

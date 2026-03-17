@@ -1,8 +1,8 @@
 tissue	sample	frag_path	workdir
-breast_regner_2025_healthy	HCC1143	data/bgz/HCC1143_ATAC_fragments.fragments.tsv.gz	/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_celllines
-breast_regner_2025_healthy	MCF7	data/bgz/MCF7_ATAC_fragments.fragments.tsv.gz	/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_celllines
-breast_regner_2025_healthy	SUM149PT	data/bgz/SUM149PT_ATAC_fragments.fragments.tsv.gz	/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_celllines
-breast_regner_2025_healthy    T47D    data/bgz/T47D_ATAC_fragments.fragments.tsv.gz	/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_celllines
+breast_regner_2025_cell_lines	HCC1143	data/bgz/HCC1143_ATAC_fragments.fragments.tsv.gz	/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_celllines
+breast_regner_2025_cell_lines	MCF7	data/bgz/MCF7_ATAC_fragments.fragments.tsv.gz	/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_celllines
+breast_regner_2025_cell_lines	SUM149PT	data/bgz/SUM149PT_ATAC_fragments.fragments.tsv.gz	/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_celllines
+breast_regner_2025_cell_lines    T47D    data/bgz/T47D_ATAC_fragments.fragments.tsv.gz	/working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_celllines
 breast_regner_2025_healthy  patient_1   frags/bgz/GSM7789985_Patient_1_49758L_ATAC_fragments.fragments.tsv.gz   /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_mammary
 breast_regner_2025_healthy  patient_2   frags/bgz/GSM7789987_Patient_2_49CFCL_ATAC_fragments.fragments.tsv.gz   /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_mammary
 breast_regner_2025_healthy  patient_3   frags/bgz/GSM7789989_Patient_3_4AF75L_ATAC_fragments.fragments.tsv.gz   /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/Regner_2025_mammary
@@ -88,8 +88,8 @@ heart_kanemaru_2023_healthy samp45   fragments_standardized/bgz/Kanemaru2023-car
 heart_kanemaru_2023_healthy samp46   fragments_standardized/bgz/Kanemaru2023-cardiac_tissue-HCAHeartST13189995_HCAHeartST13188800.fragments.tsv.gz    /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/scATAC_corpus/Kanemaru2023/Kanemaru2023-cardiac_tissue/frags/Kanemaru2023/Kanemaru2023-cardiac_tissue
 heart_kanemaru_2023_healthy samp47   fragments_standardized/bgz/Kanemaru2023-cardiac_tissue-HCAHeartST13189996_HCAHeartST13188801.fragments.tsv.gz    /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/scATAC_corpus/Kanemaru2023/Kanemaru2023-cardiac_tissue/frags/Kanemaru2023/Kanemaru2023-cardiac_tissue
 heart_kanemaru_2023_healthy samp48   fragments_standardized/bgz/Kanemaru2023-cardiac_tissue-HCAHeartST13189997_HCAHeartST13188802.fragments.tsv.gz    /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/scATAC_corpus/Kanemaru2023/Kanemaru2023-cardiac_tissue/frags/Kanemaru2023/Kanemaru2023-cardiac_tissue
+pancreas_zhang_2021_healthy samp1   frags/Zhang2021/Zhang2021-pancreatic_tissue/fragments_standardized/bgz/Zhang2021-pancreatic_tissue-pancreas_SM-ADRUQ_1.fragments.tsv.gz /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/scATAC_corpus/Zhang2021/Zhang2021-pancreatic_tissue/
+pancreas_zhang_2021_healthy samp2   frags/Zhang2021/Zhang2021-pancreatic_tissue/fragments_standardized/bgz/Zhang2021-pancreatic_tissue-pancreas_SM-IOBHS_1.fragments.tsv.gz /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/scATAC_corpus/Zhang2021/Zhang2021-pancreatic_tissue/
+pancreas_zhang_2021_healthy samp3   frags/Zhang2021/Zhang2021-pancreatic_tissue/fragments_standardized/bgz/Zhang2021-pancreatic_tissue-pancreas_SM-JF1NS_1.fragments.tsv.gz /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/scATAC_corpus/Zhang2021/Zhang2021-pancreatic_tissue/
+pancreas_zhang_2021_healthy samp4   frags/Zhang2021/Zhang2021-pancreatic_tissue/fragments_standardized/bgz/Zhang2021-pancreatic_tissue-pancreas_SM-JF1O6_1.fragments.tsv.gz /working/joint_projects/bc_risk_locus_multiomics/published_scATAC/downloaded/scATAC_corpus/Zhang2021/Zhang2021-pancreatic_tissue/
 
-
-
-kidney	SampleA	frags/kidney_sampleA.fragments.tsv.gz	/mnt/data/kidney_study
-kidney	SampleB	frags/kidney_sampleB.fragments.tsv.gz	/mnt/data/kidney_study

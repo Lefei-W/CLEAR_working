@@ -1,27 +1,40 @@
 # Self-contained ArchR batch pipeline for multiple tissues and samples.
 
 suppressPackageStartupMessages({
-  library(ArchR), library(BSgenome.Hsapiens.UCSC.hg38), library(Biostrings), library(GenomicRanges),
-  library(ggplot2), library(qpdf), library(cowplot), library(patchwork), library(ComplexHeatmap),library(dplyr)
+  library(ArchR)
+  library(BSgenome.Hsapiens.UCSC.hg38)
+  library(Biostrings)
+  library(GenomicRanges)
+  library(ggplot2)
+  library(qpdf)
+  library(cowplot)
+  library(patchwork)
+  library(ComplexHeatmap)
+  library(dplyr)
 })
 
 addArchRGenome("hg38")
 addArchRThreads(24) 
 source('~/plottheme.R')
 
+DEFAULT_OUTPUT_BASE <- "/working/lab_jonathb/lefeiW/projects/CLEAR_data/ArchR_batch_processed"
+
 print_usage <- function() {
   cat(
     "Usage:\n",
-    "  Rscript ArchR_streamline_batch.R <input_tsv> <output_base> [genome] [threads] [minTSS] [minFrags]\n\n",
+    "  Rscript ArchR_streamline_batch.R <input_tsv> [output_base] [genome] [threads] [minTSS] [minFrags] [tissue_filter] [macs2_path]\n\n",
     "Arguments:\n",
-    "  input_tsv   Tab-delimited file with columns: tissue, sample, frag_path, workdir\n",
-    "  output_base Base output directory (one subfolder per tissue)\n",
+    "  input_tsv   Delimited file with columns: tissue, sample, frag_path, [workdir]\n",
+    "  output_base Base output directory (one subfolder per tissue).\n",
+    "              Default: /working/lab_jonathb/lefeiW/projects/CLEAR_data/ArchR_batch_processed\n",
     "  genome      ArchR genome, default: hg38\n",
     "  threads     Number of threads, default: 24\n",
     "  minTSS      Minimum TSS enrichment, default: 4\n",
-    "  minFrags    Minimum fragments, default: 3200\n\n",
+    "  minFrags    Minimum fragments, default: 3200\n",
+    "  tissue_filter Optional tissue name to run only one tissue\n",
+    "  macs2_path  Path to MACS2 executable for peak calling\n\n",
     "Example:\n",
-    "  Rscript ArchR_streamline_batch.R inputs.tsv /path/to/output hg38 24 4 3200\n"
+    "  Rscript ArchR_streamline_batch.R inputs.tsv /path/to/output hg38 24 4 3200 breast_regner_2025_healthy /software/MACS2/MACS2-20241021/Python-3.7.7-venv/bin/macs2\n"
   )
 }
 
@@ -31,13 +44,12 @@ if (length(args) == 0 || any(args %in% c("--help", "-h"))) {
   quit(status = 0)
 }
 
-if (length(args) < 2) {
+if (length(args) < 1) {
   print_usage()
-  stop("Missing required arguments: input_tsv and output_base")
+  stop("Missing required argument: input_tsv")
 }
 
 input_tsv <- args[1]
-output_base <- args[2]
 
 get_arg_or_default <- function(i, default) {
   if (length(args) >= i && nzchar(args[i])) {
@@ -46,42 +58,53 @@ get_arg_or_default <- function(i, default) {
   default
 }
 
+output_base <- get_arg_or_default(2, DEFAULT_OUTPUT_BASE)
 genome <- get_arg_or_default(3, "hg38")
 threads <- as.integer(get_arg_or_default(4, "24"))
 minTSS <- as.numeric(get_arg_or_default(5, "4"))
 minFrags <- as.integer(get_arg_or_default(6, "3200"))
+tissue_filter <- get_arg_or_default(7, "")
+path_to_macs2 <- get_arg_or_default(8, "/software/MACS2/MACS2-20241021/Python-3.7.7-venv/bin/macs2")
 
 if (!file.exists(input_tsv)) {
   stop("Input TSV not found: ", input_tsv)
 }
 
+dir.create(output_base, recursive = TRUE, showWarnings = FALSE)
+
 ArchR::addArchRGenome(genome)
 ArchR::addArchRThreads(threads)
 
-inputs <- read.table(input_tsv, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
-required_cols <- c("tissue", "sample", "frag_path", "workdir")
+inputs <- read.table(input_tsv, header = TRUE, sep = "", stringsAsFactors = FALSE, check.names = FALSE)
+required_cols <- c("tissue", "sample", "frag_path")
 missing_cols <- setdiff(required_cols, colnames(inputs))
 if (length(missing_cols) > 0) {
   stop("Input TSV is missing columns: ", paste(missing_cols, collapse = ", "))
 }
 
+if (!"workdir" %in% colnames(inputs)) {
+  inputs$workdir <- ""
+}
+
+if (nzchar(tissue_filter)) {
+  inputs <- inputs[inputs$tissue == tissue_filter, , drop = FALSE]
+  if (nrow(inputs) == 0) {
+    stop("No rows found for tissue_filter: ", tissue_filter)
+  }
+}
+
 resolve_path <- function(path, base_dir) {
-  is_abs_unix <- grepl("^/", path)
-  is_abs_win <- grepl("^[A-Za-z]:\\\\", path)
-  is_abs_unc <- grepl("^\\\\\\\\", path)
-  if (is_abs_unix || is_abs_win || is_abs_unc) {
+  if (!nzchar(base_dir)) {
     return(normalizePath(path, mustWork = FALSE))
   }
   normalizePath(file.path(base_dir, path), mustWork = FALSE)
 }
 
-run_tissue <- function(tissue_name, tissue_df) {
-  workdirs <- unique(tissue_df$workdir)
-  if (length(workdirs) != 1) {
-    stop("Multiple workdir values found for tissue: ", tissue_name)
-  }
-  workdir <- workdirs[1]
+sanitize_name <- function(x) {
+  gsub("[^A-Za-z0-9_]+", "_", x)
+}
 
+run_tissue <- function(tissue_name, tissue_df) {
   tissue_dir <- file.path(output_base, tissue_name)
   dir.create(tissue_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(file.path(tissue_dir, "plots"), recursive = TRUE, showWarnings = FALSE)
@@ -91,11 +114,11 @@ run_tissue <- function(tissue_name, tissue_df) {
   on.exit(setwd(old_wd), add = TRUE)
   setwd(tissue_dir)
 
-  tissue_df$frag_path <- vapply(
-    tissue_df$frag_path,
-    resolve_path,
-    character(1),
-    base_dir = workdir
+  tissue_df$frag_path <- mapply(
+    FUN = resolve_path,
+    path = tissue_df$frag_path,
+    base_dir = ifelse(is.na(tissue_df$workdir), "", as.character(tissue_df$workdir)),
+    USE.NAMES = FALSE
   )
   frag_paths <- setNames(tissue_df$frag_path, tissue_df$sample)
   sample_names <- tissue_df$sample
@@ -109,9 +132,10 @@ run_tissue <- function(tissue_name, tissue_df) {
     addGeneScoreMat = TRUE
   )
 
+  project_dir <- paste0("ArchR_", sanitize_name(tissue_name))
   proj <- ArchRProject(
     ArrowFiles = arrow_files,
-    outputDirectory = file.path(tissue_dir, "ArchRProject"),
+    outputDirectory = project_dir,
     copyArrows = TRUE
   )
 
@@ -205,6 +229,29 @@ run_tissue <- function(tissue_name, tissue_df) {
   print(p_heat)
   dev.off()
 
+  proj <- addGroupCoverages(
+    ArchRProj = proj,
+    groupBy = "Clusters_ArchR"
+  )
+
+  proj <- addReproduciblePeakSet(
+    ArchRProj = proj,
+    groupBy = "Clusters_ArchR",
+    force = TRUE,
+    pathToMacs2 = path_to_macs2,
+    maxPeaks = 300000,
+    cutOff = 0.01
+  )
+
+  proj <- addPeakMatrix(proj)
+
+  groupse <- getGroupSE(
+    ArchRProj = proj,
+    useMatrix = "PeakMatrix",
+    groupBy = "Clusters_ArchR"
+  )
+  saveRDS(groupse, file.path(tissue_dir, "peakcalls_Clusters_ArchR_groupSE_PeakMatrix.rds"))
+
   saveRDS(proj, file.path(tissue_dir, paste0(tissue_name, "_ArchRProject.rds")))
 }
 
@@ -213,3 +260,5 @@ for (tissue_name in tissues) {
   tissue_df <- inputs[inputs$tissue == tissue_name, , drop = FALSE]
   run_tissue(tissue_name, tissue_df)
 }
+
+
