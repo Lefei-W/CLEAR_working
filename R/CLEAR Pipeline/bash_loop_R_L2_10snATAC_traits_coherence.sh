@@ -7,7 +7,7 @@ SD=${WD}/jobs
 OD=${WD}/output
 RSCRIPT=${WD}/R/run_clear_pair_locus.R
 GTF=/working/lab_jonathb/lefeiW/projects/CLEAR_data/gencode.v46.chr_patch_hapl_scaff.basic.annotation.gtf.gz
-NPERM=100
+NPERM=1000
 KLINEAGE=4
 
 # make dirs
@@ -53,7 +53,8 @@ TRAIT_INPUTS=(
   "CIMBA_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/CIMBA_FineMapping.rds"
   "HER2_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/HER2_FineMapping.rds"
   "TripleNeg_susie|/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/TripleNeg_FineMapping.rds"
-
+  "TripleNeg_opentarget|/working/lab_jonathb/lefeiW/projects/ATAC_BCAC/data/opentarget_trait/tnbc_brca1_2020_zhang_cs18__GCST010100/tnbc_brca1_2020_zhang_cs18__GCST010100_CLEAR_credible_set_variants.gr.rds"
+  "bc_ovarian_prostate_pleiotropy|/working/lab_jonathb/lefeiW/projects/ATAC_BCAC/data/opentarget_trait/bc_ovarian_prostate_pleiotropy_2016_kar_cs18__GCST010797/bc_ovarian_prostate_pleiotropy_2016_kar_cs18__GCST010797_CLEAR_credible_set_variants.gr.rds"
 )
 
 # ---- Loop over all SE x trait pairs ----
