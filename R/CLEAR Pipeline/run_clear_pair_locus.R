@@ -708,7 +708,13 @@ addLocusCoherence <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, k_lineage
   
   cell_cor <- cor(mat_l2, method = "pearson")
   hc <- hclust(as.dist(1 - cell_cor), method = "average")
-  cell_lineage <- cutree(hc, k = k_lineage)
+  lineage_ids <- cutree(hc, k = k_lineage)
+  lineage_labels <- tapply(
+    names(lineage_ids),
+    lineage_ids,
+    function(x) paste(sort(x), collapse = ":")
+  )
+  cell_lineage <- setNames(as.character(lineage_labels[as.character(lineage_ids)]), names(lineage_ids))
   
   
   locus_results <- compute_locus_rank_concordance_vec(
@@ -892,10 +898,15 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir)
   specificity_summary_l2 <- specificity_summary_l2_detailed %>%
     left_join(specificity_basic, by = "peak")
   specificity_summary_l2 <- add_gwas_peak_annotation(specificity_summary_l2, snps)
+  specificity_summary_l2$locus <- ifelse(
+    is.na(specificity_summary_l2$gwas_locus),
+    "",
+    as.character(specificity_summary_l2$gwas_locus)
+  )
   
   specificity_summary_l2 <- specificity_summary_l2 %>%
     select(
-      peak, gwas_snps, gwas_locus,
+      locus, peak, gwas_snps, gwas_locus,
       maximum_cell, maximum_score, dominant_ratio, is_dominant,
       n_high, n_mid, n_low, high_cells, multiple_high,
       k_cells, top_k_cells, coherence
@@ -920,6 +931,7 @@ plot_coherence <- function(locus_results, se_name, trait_name, plots_dir) {
     dplyr::filter(n_peaks > 1) %>%
     dplyr::mutate(
       neg_log10_p = -log10(p_value),
+      dominant_lineage = as.character(dominant_lineage),
       category = factor(
         category,
         levels = c("Highly_coherent_specific", "Coherent_moderate", "Intermediate", "Incoherent", "Single_peak")
@@ -935,7 +947,7 @@ plot_coherence <- function(locus_results, se_name, trait_name, plots_dir) {
   p_locus_cat <- ggplot(plot_df, aes(x = concordance, y = neg_log10_p)) +
     geom_hline(yintercept = -log10(0.05), linetype = "dashed", linewidth = 0.55, color = "gray35") +
     geom_vline(xintercept = 0.5, linetype = "dotted", linewidth = 0.5, color = "gray45") +
-    geom_point(aes(size = n_peaks, color = category), alpha = 0.88) +
+    geom_point(aes(size = n_peaks, color = category, shape = dominant_lineage), alpha = 0.88) +
     scale_color_manual(
       values = c(
         Highly_coherent_specific = "#C43C39",
@@ -946,6 +958,7 @@ plot_coherence <- function(locus_results, se_name, trait_name, plots_dir) {
       ),
       drop = FALSE
     ) +
+    scale_shape_discrete(name = "Dominant lineage") +
     scale_size_continuous(range = c(2.3, 8.2), breaks = c(2, 5, 10, 20, 30)) +
     scale_x_continuous(limits = c(-1, 1), breaks = seq(-1, 1, by = 0.25), expand = expansion(mult = c(0.02, 0.02))) +
     coord_cartesian(ylim = c(0, y_cap)) +
@@ -965,6 +978,7 @@ plot_coherence <- function(locus_results, se_name, trait_name, plots_dir) {
       title = paste0(se_name, " x ", trait_name, " - Locus concordance categories"),
       subtitle = paste0("Loci with >1 peak: n = ", nrow(plot_df), " (y-axis capped at 99th percentile)"),
       color = "Category",
+      shape = "Dominant lineage",
       size = "N peaks"
     )
   
