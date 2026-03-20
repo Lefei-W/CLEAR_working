@@ -87,6 +87,7 @@ The script runs one snATAC dataset x one GWAS trait pair.
 ## WIP: 
 ## Currently it's taking properties from each signal, and grabbing peaks genome-wide, thinking of to do one permutation across the snATAC within a GWAS-ish region (500k window) and bin the permutations based on genes, peaks density ... IDEAS: 1. use 1000 random GWAS loci from different traits from OpenTargets 2. Check s-LDSC for baseline annotations 3. Might need to consider the rank correlation calculation, the top cell types or lineage (hypothesis!) might stay in similar ranks, but bottom noisy cell types could be crap and affect correlation, thinking of putting more weights on the top cell types like L2?  
 - For each GWAS locus (signal), test whether GWAS peaks in that locus have higher concordant within-peak cell-type ranks.
+- Concordance across peaks at a GWAS locus does not necessarily imply uniform activity across all cell types, rather, it may reflect coordinated regulation within a subset of related cell types that share developmental origin or regulatory programs. Cell lineage was defined using the genome-wide L2 normalised matrix. This avoids circularity and ensures that lineage structure reflects global epigenomic architecture rather than locus-specific signal.Then aggregating the mean accessibility profile of its peaks across these predefined lineages, allowing us to assign a dominant lineage, and quantify the fraction of total signal captured by that lineage. 
 - Build matched permutation null using joint bins:
   - TSS-distance bin
   - local peak-density bin
@@ -170,7 +171,7 @@ One row per GWAS locus (signal value).
 | p_value | Empirical one-sided p-value, using +1 correction: (count(perm >= obs)+1)/(n_perm_eff+1). |
 | dominant_cell_locus | Cell type with highest locus-average L2 signal. |
 | dominant_score_locus | That maximum locus-average L2 value. |
-| dominant_lineage | Dominant lineage cluster label from hierarchical clustering of cell types. |
+| dominant_lineage | Dominant lineage cluster label from hierarchical clustering of cell types. Lineage was defined |
 | lineage_fraction | Fraction of locus-average signal captured by the dominant lineage. Lineage fraction = max⁡(lineage signal) / sum(lineage signals) |
 | significant | TRUE if p_value < 0.05. |
 | category | Rule-based locus class. |
