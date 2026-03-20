@@ -154,6 +154,7 @@ One row per GWAS-overlapping peak.
 | High-specificity | high_thresh = 1/sqrt(3) (~0.577) |
 | Mid | mid_thresh = 1/sqrt(number_of_cell_types) |
 | Top-k explanatory | cumulative L2^2 >= 0.8 for k_cells/top_k_cells |
+
 ### B) locus_concordance_permutation.txt
 
 One row per GWAS locus (signal value).
@@ -170,7 +171,7 @@ One row per GWAS locus (signal value).
 | dominant_cell_locus | Cell type with highest locus-average L2 signal. |
 | dominant_score_locus | That maximum locus-average L2 value. |
 | dominant_lineage | Dominant lineage cluster label from hierarchical clustering of cell types. |
-| lineage_fraction | Fraction of locus-average signal captured by the dominant lineage. |
+| lineage_fraction | Fraction of locus-average signal captured by the dominant lineage. Lineage fraction = max⁡(lineage signal) / sum(lineage signals) |
 | significant | TRUE if p_value < 0.05. |
 | category | Rule-based locus class. |
 
