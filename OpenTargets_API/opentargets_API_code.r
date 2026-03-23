@@ -7,7 +7,7 @@ library(dplyr)
 library(GenomicRanges)
 library(S4Vectors)
 
-setwd('/working/lab_jonathb/lefeiW/projects/ATAC_BCAC/')
+setwd('/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/')
 
 proxy_url <- "http://lefei.wang:Mrhuai990116&7@webproxy.adqimr.ad.lan:8080/"
 
@@ -34,7 +34,7 @@ content(r, "text", encoding = "UTF-8")
 
 #  config 
 BASE_URL    <- "https://api.platform.opentargets.org/api/v4/graphql"
-OUT_ROOT    <- "data/opentarget_trait"
+OUT_ROOT    <- "opentarget_trait"
 PAGE_IDS    <- 200      # page size for set IDs
 PAGE_LOCUS  <- 200      # page size for variants
 SLEEP_SEC   <- 0.15
@@ -60,7 +60,14 @@ study_map <- c(
   "FINNGEN_R12_HEIGHT_IRN" = "height_finngen_cs1903",
   "GCST90310178" = "sitting_height_2025_Hu_cs686",
   "GCST90016665" = "ovarian_cancer_2022_Dareng_cs27",
-  "FINNGEN_R12_CD2_INSITU_BREAST_INTRADUCTAL_EXALLC" = "dcis_2023_Kurki_cs8"
+  "FINNGEN_R12_CD2_INSITU_BREAST_INTRADUCTAL_EXALLC" = "dcis_2023_Kurki_cs8",
+  "GCST90292538" = "IBD_2024_Liu_cs293",
+  "GCST90255621" = "BMI_2022_Huang_cs1071",
+  "GCST90310294" = "systolic_blood_pressure_2024_Keaton_cs1162",
+  "GCST90310295" = "diastolic_blood_pressure_2024_Keaton_cs1108",
+  "GCST90132314" = "coronary_artery_disease_2022_Aragam_cs250",
+  "GCST90105038" = "educational_attainment_2022_Okbay_cs1599",
+  "GCST90503210" = "schizophrenia_2025_Dang_cs247"
   
 )
 
