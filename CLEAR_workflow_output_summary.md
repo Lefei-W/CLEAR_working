@@ -18,6 +18,13 @@ The script runs one snATAC dataset x one GWAS trait pair.
   - Rebuilding row genomic ranges if needed. RSE
   - L2-normalizing each peak across cell types to create raw_l2.
   - Creating rank matrix raw_l2_rank.
+- Define cell lineages from the genome-wide raw_l2 matrix (same definition used later in Step 7 & 8):
+  - Cell-type correlation: Pearson correlation across genome-wide peak profiles.
+  - Distance for clustering: 1 - correlation.
+  - Hierarchical clustering: average linkage.
+  - Lineage cut: cutree with k = k_lineage. (consider calculate the effective sample size or user defined lineages after providing the dendrogram)
+  - Lineage label: colon-joined sorted member cell types per cluster.
+- Save lineage QC dendrogram plot of cell types.
 
 ### Step 2. Define core matrix (ALL on L2)
 - Use raw_l2 as the main matrix for specificity, dominance, locus coherence, and global enrichment.
@@ -81,6 +88,11 @@ The script runs one snATAC dataset x one GWAS trait pair.
 - Compare dominant-cell-type composition between genome-wide peaks and GWAS peaks.
 - Add per-cell-type dominance enrichment test using dominant peaks only:
   - Dominant peak definition: dominant_ratio > 2.
+- Add lineage-level dominance using the same lineage definition from Step 1 / Step 8:
+  - Aggregate each peak's L2 values within each lineage (sum across cell types in that lineage).
+  - Compute lineage dominant ratio as top1_lineage / top2_lineage.
+  - Dominant lineage definition: lineage dominant ratio > 2.
+  - Plot genome-wide vs GWAS dominant lineage composition as a dodge bar plot.
 
 
 ### Step 8. Locus-level permutation concordance
@@ -207,6 +219,9 @@ One row per cell type.
 ## 3) Plots and what each plot shows
 
 ## Correlation and density QC
+- se_celltype_lineage_dendrogram.pdf:
+  - Hierarchical clustering of cell types using 1 - Pearson correlation on genome-wide raw_l2.
+  - Red rectangles indicate k_lineage clusters used for lineage-aware analyses.
 - tissue_assay_cor_heatmap.pdf:
   - Cell-type x cell-type correlation heatmap within an assay (raw or raw_l2).
   - Shows similarity structure among cell types.
@@ -228,6 +243,10 @@ One row per cell type.
 - se_trait_dominance_l2.pdf:
   - Side-by-side proportions of dominant peaks (ratio > 2) by maximum cell type.
   - Compares genome-wide set vs GWAS set.
+- se_trait_dominance_lineage_l2.pdf:
+  - Side-by-side proportions of dominant peaks (lineage top1/top2 ratio > 2) by maximum lineage.
+  - Maximum lineage is based on lineage-summed L2 signal per peak.
+  - Compares genome-wide set vs GWAS set.
 
 ## Locus coherence plot
 - se_trait_locus_concordance_category.pdf:
@@ -248,5 +267,7 @@ One row per cell type.
 
 
 ## Notes
-- This pipeline intentionally uses raw + L2 + rank-based analyses and does not use quantile normalization or covariance-weighted matrices.
-- n_perm controls permutation depth in locus analysis (default 100).
+- This pipeline uses raw + L2 + rank-based analyses and does not use quantile normalization (done with ArchR) either covariance-weighted matrices, nor composite score (accounting for the raw signal).
+- Current permutation controls for the TSS distance bin and peak density, and randomly picking peaks genome-wide, thinking about taking the GWAS region (randomly smaple peaks from a random GWAS region), additionally uses the raw signal in the concordance calculation.
+- Improve the coherent plot with color, labelling, threshold (lineage cutoffs). Check difference between significant signals, e.g. those heart failure signals that are significant in breast against those sinificant heart failure signals in heart.
+- Dominance analysis needs to take lineage into account, asking if the cell types in one lineage combined contribute 2-times of the next. 

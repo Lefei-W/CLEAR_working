@@ -2,9 +2,9 @@
 # ============================================================
 # run_clear_pair_locus.R
 # One snATAC SE x GWAS trait pair:
-# - L2 specificity + dominance 
-# - Global rank-based enrichment
-# - Locus-level rank concordance with matched-bin permutation null
+# - L2 specificity + dominance on cell type and lineage (add lineage before dominance)
+# - Global rank-based enrichment (Cell type specific)
+# - Locus-level rank concordance with matched-bin permutation null (test whether locus-level peaks converge on a shared program)
 #   (no QN / cov-weighted matrices)
 # ============================================================
 
@@ -285,6 +285,54 @@ compute_dominance <- function(mat, ratio_thresh = 2) {
 
 DEFAULT_RATIO_THRESH <- 2
 
+build_lineage_map <- function(mat_l2, k_lineage = 4L) {
+  if (inherits(mat_l2, "Matrix")) mat_l2 <- as.matrix(mat_l2)
+  storage.mode(mat_l2) <- "double"
+  if (is.null(colnames(mat_l2))) {
+    colnames(mat_l2) <- paste0("ct", seq_len(ncol(mat_l2)))
+  }
+
+  cell_cor <- cor(mat_l2, method = "pearson")
+  hc <- hclust(as.dist(1 - cell_cor), method = "average")
+  lineage_ids <- cutree(hc, k = k_lineage)
+  lineage_labels <- tapply(
+    names(lineage_ids),
+    lineage_ids,
+    function(x) paste(sort(x), collapse = ":")
+  )
+  cell_lineage <- setNames(as.character(lineage_labels[as.character(lineage_ids)]), names(lineage_ids))
+
+  list(
+    cell_cor = cell_cor,
+    hc = hc,
+    lineage_ids = lineage_ids,
+    lineage_labels = lineage_labels,
+    cell_lineage = cell_lineage,
+    k_lineage = k_lineage
+  )
+}
+
+plot_lineage_dendrogram <- function(lineage_obj, se_name, plot_dir = "plots") {
+  fname <- file.path(plot_dir, paste0(se_name, "_celltype_lineage_dendrogram.pdf"))
+  hc <- lineage_obj$hc
+  k_lineage <- lineage_obj$k_lineage
+
+  grDevices::pdf(fname, width = 10, height = 6)
+  op <- par(mar = c(10, 4, 4, 2))
+  plot(
+    hc,
+    main = paste0(se_name, " - Cell-type lineage dendrogram (k=", k_lineage, ")"),
+    xlab = "",
+    sub = "Distance = 1 - Pearson correlation on genome-wide raw_l2",
+    cex = 0.7
+  )
+  rect.hclust(hc, k = k_lineage, border = "firebrick")
+  par(op)
+  grDevices::dev.off()
+
+  invisible(fname)
+}
+
 plot_celltype_stackbars <- function(
     se_overlap,
     value_metric = "raw_l2",
@@ -527,6 +575,114 @@ dominance_dodge_plot <- function(genome_mat, gwas_mat,
     )
 }
 
+compute_dominance_lineage <- function(mat, cell_lineage, ratio_thresh = 2) {
+  n_rows <- nrow(mat)
+  n_cols <- ncol(mat)
+  if (n_rows == 0L) {
+    return(data.frame(maximum_lineage = character(), ratio = numeric(), is_dominant = logical(), peak = character()))
+  }
+  if (is.null(colnames(mat))) colnames(mat) <- paste0("ct", seq_len(n_cols))
+
+  lineage_vec <- cell_lineage[colnames(mat)]
+  missing_lineage <- is.na(lineage_vec) | !nzchar(lineage_vec)
+  if (any(missing_lineage)) {
+    lineage_vec[missing_lineage] <- colnames(mat)[missing_lineage]
+  }
+
+  lineage_levels <- unique(as.character(lineage_vec))
+  lineage_mat <- sapply(lineage_levels, function(lg) {
+    rowSums(mat[, lineage_vec == lg, drop = FALSE])
+  })
+  lineage_mat <- as.matrix(lineage_mat)
+  if (is.null(dim(lineage_mat))) {
+    lineage_mat <- matrix(lineage_mat, ncol = 1)
+    colnames(lineage_mat) <- lineage_levels[1]
+  }
+  rownames(lineage_mat) <- rownames(mat)
+
+  if (ncol(lineage_mat) < 2L) {
+    return(data.frame(
+      maximum_lineage = rep(colnames(lineage_mat)[1], nrow(lineage_mat)),
+      ratio = rep(NA_real_, nrow(lineage_mat)),
+      is_dominant = rep(FALSE, nrow(lineage_mat)),
+      peak = rownames(lineage_mat),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  max_idx <- max.col(lineage_mat, ties.method = "first")
+  max_val <- lineage_mat[cbind(seq_len(nrow(lineage_mat)), max_idx)]
+
+  lineage_mat2 <- lineage_mat
+  lineage_mat2[cbind(seq_len(nrow(lineage_mat2)), max_idx)] <- -Inf
+  second_val <- lineage_mat2[cbind(seq_len(nrow(lineage_mat2)), max.col(lineage_mat2, ties.method = "first"))]
+
+  ratio <- ifelse(second_val == 0, Inf, max_val / second_val)
+
+  data.frame(
+    maximum_lineage = colnames(lineage_mat)[max_idx],
+    ratio = ratio,
+    is_dominant = ratio > ratio_thresh,
+    peak = rownames(lineage_mat),
+    stringsAsFactors = FALSE
+  )
+}
+
+dominance_lineage_dodge_plot <- function(genome_mat, gwas_mat, cell_lineage,
+                                         ratio_thresh = DEFAULT_RATIO_THRESH,
+                                         title_label  = "") {
+  dom_genome <- compute_dominance_lineage(genome_mat, cell_lineage, ratio_thresh = ratio_thresh)
+  dom_gwas <- compute_dominance_lineage(gwas_mat, cell_lineage, ratio_thresh = ratio_thresh)
+
+  n_dom_genome <- sum(dom_genome$is_dominant)
+  n_dom_gwas <- sum(dom_gwas$is_dominant)
+
+  df <- dplyr::bind_rows(
+    dom_genome %>% dplyr::filter(is_dominant) %>% dplyr::count(maximum_lineage) %>%
+      dplyr::mutate(proportion = ifelse(n_dom_genome > 0, n / n_dom_genome, 0), set = "Genome-wide"),
+    dom_gwas %>% dplyr::filter(is_dominant) %>% dplyr::count(maximum_lineage) %>%
+      dplyr::mutate(proportion = ifelse(n_dom_gwas > 0, n / n_dom_gwas, 0), set = "GWAS")
+  )
+
+  if (!nrow(df)) {
+    df <- data.frame(
+      maximum_lineage = character(),
+      n = integer(),
+      proportion = numeric(),
+      set = character(),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  df <- tidyr::complete(df, maximum_lineage, set,
+                        fill = list(n = 0L, proportion = 0))
+
+  df$set <- factor(df$set, levels = c("Genome-wide", "GWAS"))
+  df$bar_label <- ifelse(df$n > 0,
+                         paste0(df$n, " (", round(df$proportion * 100, 1), "%)"), "")
+
+  ct_order <- df %>% dplyr::filter(set == "GWAS") %>%
+    dplyr::arrange(proportion) %>% dplyr::pull(maximum_lineage)
+  df$maximum_lineage <- factor(df$maximum_lineage, levels = ct_order)
+
+  ggplot(df, aes(x = maximum_lineage, y = proportion, fill = set)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+    geom_text(aes(label = bar_label),
+              position = position_dodge(width = 0.8), hjust = -0.05, size = 2.8) +
+    coord_flip() +
+    scale_fill_manual(values = c("Genome-wide" = "grey60", "GWAS" = "firebrick")) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.25))) +
+    theme_bw() +
+    labs(
+      title = paste0("Dominant lineages (ratio > ", ratio_thresh, ") ", title_label),
+      subtitle = paste0("Genome-wide: ", nrow(genome_mat), " peaks (", n_dom_genome,
+                        " dominant);  GWAS: ", nrow(gwas_mat), " peaks (", n_dom_gwas, " dominant)"),
+      x = "Lineage",
+      y = "Proportion within dominant peaks",
+      fill = "Peak set"
+    )
+}
+
 get_tss <- function(gtf) {
   genes <- gtf[gtf$type == "gene"]
   genes <- genes[genes$gene_type %in% c("lncRNA", "protein_coding")]
@@ -674,7 +830,7 @@ compute_locus_rank_concordance_vec <- function( # Whether peaks in the same GWAS
   do.call(rbind, results)
 }
 
-addLocusCoherence <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, k_lineage, n_perm, results_dir) {
+addLocusCoherence <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, lineage_obj, n_perm, results_dir) {
   if (!nrow(gwas_mat)) return(data.frame())
   if (!file.exists(gtf_path)) {
     message("  Skipping locus analysis: GTF file not found at ", gtf_path)
@@ -705,17 +861,8 @@ addLocusCoherence <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, k_lineage
   joint_bin_full <- interaction(tss_bin, density_bin, drop = TRUE)
   joint_bin_full <- as.character(joint_bin_full)
   names(joint_bin_full) <- names(tss_bin)
-  
-  cell_cor <- cor(mat_l2, method = "pearson")
-  hc <- hclust(as.dist(1 - cell_cor), method = "average")
-  lineage_ids <- cutree(hc, k = k_lineage)
-  lineage_labels <- tapply(
-    names(lineage_ids),
-    lineage_ids,
-    function(x) paste(sort(x), collapse = ":")
-  )
-  cell_lineage <- setNames(as.character(lineage_labels[as.character(lineage_ids)]), names(lineage_ids))
-  
+
+  cell_lineage <- lineage_obj$cell_lineage
   
   locus_results <- compute_locus_rank_concordance_vec(
     gwas_mat = gwas_mat,
@@ -922,7 +1069,14 @@ plot_dominance <- function(mat_l2, gwas_mat, se_name, trait_name, plots_dir) {
   invisible(p_dom_l2)
 }
 
+plot_dominance_lineage <- function(mat_l2, gwas_mat, cell_lineage, se_name, trait_name, plots_dir) {
+  p_dom_lineage <- dominance_lineage_dodge_plot(mat_l2, gwas_mat, cell_lineage = cell_lineage, title_label = "L2mat")
+  ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_dominance_lineage_l2.pdf")), p_dom_lineage, width = 8, height = 6)
+  invisible(p_dom_lineage)
+}
+
 plot_domiance <- plot_dominance
+plot_domiance_lineage <- plot_dominance_lineage
 
 plot_coherence <- function(locus_results, se_name, trait_name, plots_dir) {
   if (!nrow(locus_results)) return(invisible(NULL))
@@ -1068,6 +1222,11 @@ if (!all(required_assays %in% assayNames(se))) {
 
 message("  SE:   ", nrow(se), " peaks x ", ncol(se), " cell types")
 
+message("  Building lineage map from genome-wide raw_l2 and plotting dendrogram")
+lineage_obj <- build_lineage_map(assay(se, "raw_l2"), k_lineage = k_lineage)
+plot_lineage_dendrogram(lineage_obj, se_name, plots_dir)
+
+message("\n--- Step 2: Extract L2 matrix ---")
 mat_l2 <- assay(se, "raw_l2")
 
 message("\n--- Step 3: GWAS overlap ---")
@@ -1112,9 +1271,10 @@ plot_celltype_stackbars(
 
 message("\n--- Step 7: Dominance plots ---")
 plot_dominance(mat_l2, gwas_mat, se_name, trait_name, plots_dir)
+plot_domiance_lineage(mat_l2, gwas_mat, lineage_obj$cell_lineage, se_name, trait_name, plots_dir)
 
 message("\n--- Step 8: Locus-level permutation concordance ---")
-locus_results <- addLocusCoherence(se, se_gwas, mat_l2, gwas_mat, gtf_path, k_lineage, n_perm, results_dir)
+locus_results <- addLocusCoherence(se, se_gwas, mat_l2, gwas_mat, gtf_path, lineage_obj, n_perm, results_dir)
 if (nrow(locus_results)) {
   plot_coherence(locus_results, se_name, trait_name, plots_dir)
 }
