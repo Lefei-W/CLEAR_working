@@ -89,8 +89,8 @@ The script runs one snATAC dataset x one GWAS trait pair.
 - Add per-cell-type dominance enrichment test using dominant peaks only:
   - Dominant peak definition: dominant_ratio > 2.
 - Add lineage-level dominance using the same lineage definition from Step 1 / Step 8:
-  - Aggregate each peak's L2 values within each lineage (sum across cell types in that lineage).
-  - Compute lineage dominant ratio as top1_lineage / top2_lineage.
+  - Aggregate each peak's L2 squared values within each lineage (sum of L2^2 across cell types in that lineage).
+  - Compute lineage dominant ratio as top1_lineage / top2_lineage on the lineage-summed L2^2 values.
   - Dominant lineage definition: lineage dominant ratio > 2.
   - Plot genome-wide vs GWAS dominant lineage composition as a dodge bar plot.
 
@@ -150,6 +150,9 @@ One row per GWAS-overlapping peak.
 | maximum_score | Highest L2 value for this peak. |
 | dominant_ratio | Ratio of top L2 to second-highest L2 (top1/top2). |
 | is_dominant | TRUE if dominant_ratio > 2. |
+| dominant_lineage | Lineage with highest lineage-summed L2^2 value for this peak. |
+| dominant_lineage_ratio | Ratio of top lineage L2^2 sum to second-highest lineage L2^2 sum. |
+| dominant_lineage_is_dominant | TRUE if dominant_lineage_ratio > 2. |
 | n_high | Number of cell types with L2 > high_thresh. |
 | n_mid | Number of cell types with mid_thresh < L2 <= high_thresh. |
 | n_low | Number of cell types with L2 <= mid_thresh. |
@@ -245,7 +248,7 @@ One row per cell type.
   - Compares genome-wide set vs GWAS set.
 - se_trait_dominance_lineage_l2.pdf:
   - Side-by-side proportions of dominant peaks (lineage top1/top2 ratio > 2) by maximum lineage.
-  - Maximum lineage is based on lineage-summed L2 signal per peak.
+  - Maximum lineage is based on lineage-summed L2^2 signal per peak.
   - Compares genome-wide set vs GWAS set.
 
 ## Locus coherence plot

@@ -590,8 +590,9 @@ compute_dominance_lineage <- function(mat, cell_lineage, ratio_thresh = 2) {
   }
 
   lineage_levels <- unique(as.character(lineage_vec))
+  mat_sq <- mat^2
   lineage_mat <- sapply(lineage_levels, function(lg) {
-    rowSums(mat[, lineage_vec == lg, drop = FALSE])
+    rowSums(mat_sq[, lineage_vec == lg, drop = FALSE])
   })
   lineage_mat <- as.matrix(lineage_mat)
   if (is.null(dim(lineage_mat))) {
@@ -639,9 +640,9 @@ dominance_lineage_dodge_plot <- function(genome_mat, gwas_mat, cell_lineage,
 
   df <- dplyr::bind_rows(
     dom_genome %>% dplyr::filter(is_dominant) %>% dplyr::count(maximum_lineage) %>%
-      dplyr::mutate(proportion = ifelse(n_dom_genome > 0, n / n_dom_genome, 0), set = "Genome-wide"),
+      dplyr::mutate(proportion = if (n_dom_genome > 0) n / n_dom_genome else 0, set = "Genome-wide"),
     dom_gwas %>% dplyr::filter(is_dominant) %>% dplyr::count(maximum_lineage) %>%
-      dplyr::mutate(proportion = ifelse(n_dom_gwas > 0, n / n_dom_gwas, 0), set = "GWAS")
+      dplyr::mutate(proportion = if (n_dom_gwas > 0) n / n_dom_gwas else 0, set = "GWAS")
   )
 
   if (!nrow(df)) {
@@ -1027,7 +1028,7 @@ plot_specificity_bar <- function(specificity_summary_l2, se_name, trait_name, pl
   invisible(p_spec_l2)
 }
 
-addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir) {
+addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir, cell_lineage = NULL) {
   if (!nrow(gwas_mat)) return(data.frame())
   
   specificity_summary_l2_detailed <- compute_specificity_summary(gwas_mat)
@@ -1044,6 +1045,23 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir)
   
   specificity_summary_l2 <- specificity_summary_l2_detailed %>%
     left_join(specificity_basic, by = "peak")
+
+  if (!is.null(cell_lineage)) {
+    dom_lineage <- compute_dominance_lineage(gwas_mat, cell_lineage, ratio_thresh = DEFAULT_RATIO_THRESH) %>%
+      dplyr::select(
+        peak,
+        dominant_lineage = maximum_lineage,
+        dominant_lineage_ratio = ratio,
+        dominant_lineage_is_dominant = is_dominant
+      )
+    specificity_summary_l2 <- specificity_summary_l2 %>%
+      left_join(dom_lineage, by = "peak")
+  } else {
+    specificity_summary_l2$dominant_lineage <- NA_character_
+    specificity_summary_l2$dominant_lineage_ratio <- NA_real_
+    specificity_summary_l2$dominant_lineage_is_dominant <- NA
+  }
+
   specificity_summary_l2 <- add_gwas_peak_annotation(specificity_summary_l2, snps)
   specificity_summary_l2$locus <- ifelse(
     is.na(specificity_summary_l2$gwas_locus),
@@ -1055,6 +1073,7 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir)
     select(
       locus, peak, gwas_snps, gwas_locus,
       maximum_cell, maximum_score, dominant_ratio, is_dominant,
+      dominant_lineage, dominant_lineage_ratio, dominant_lineage_is_dominant,
       n_high, n_mid, n_low, high_cells, multiple_high,
       k_cells, top_k_cells, coherence
     )
@@ -1070,7 +1089,7 @@ plot_dominance <- function(mat_l2, gwas_mat, se_name, trait_name, plots_dir) {
 }
 
 plot_dominance_lineage <- function(mat_l2, gwas_mat, cell_lineage, se_name, trait_name, plots_dir) {
-  p_dom_lineage <- dominance_lineage_dodge_plot(mat_l2, gwas_mat, cell_lineage = cell_lineage, title_label = "L2mat")
+  p_dom_lineage <- dominance_lineage_dodge_plot(mat_l2, gwas_mat, cell_lineage = cell_lineage, title_label = "lineage-summed L2^2")
   ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_dominance_lineage_l2.pdf")), p_dom_lineage, width = 8, height = 6)
   invisible(p_dom_lineage)
 }
@@ -1254,7 +1273,7 @@ summarize_inputs(se_name, trait_name, se_path, trait_path, se, snps, overlap, re
 message("\n--- Step 6: L2 specificity summary ---")
 high_thresh <- 1 / sqrt(3)
 mid_thresh <- 1 / sqrt(ncol(mat_l2))
-specificity_summary_l2 <- addSpecificity(gwas_mat, snps, high_thresh, mid_thresh, results_dir)
+specificity_summary_l2 <- addSpecificity(gwas_mat, snps, high_thresh, mid_thresh, results_dir, cell_lineage = lineage_obj$cell_lineage)
 plot_specificity_bar(specificity_summary_l2, se_name, trait_name, plots_dir)
 plot_celltype_stackbars(
   se_gwas,
