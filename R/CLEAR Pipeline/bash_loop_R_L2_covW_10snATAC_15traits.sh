@@ -5,13 +5,14 @@
 WD=/working/lab_jonathb/lefeiW/projects/CLEAR_2026
 SD=${WD}/jobs
 OD=${WD}/output
+PD=${WD}/processed_data
 RSCRIPT=${WD}/R/run_clear_pair_locus.R
 GTF=${WD}/CLEAR_data/gencode.v46.chr_patch_hapl_scaff.basic.annotation.gtf.gz
 NPERM=100
 KLINEAGE=4
 
 # make dirs
-mkdir -p ${SD}/qsub ${OD}
+mkdir -p ${SD}/qsub ${OD} ${PD}
 
 # ---- 10 snATAC SE inputs (name|path) ----
 SE_INPUTS=(
@@ -67,7 +68,7 @@ for SE_ENTRY in "${SE_INPUTS[@]}"; do
 #!/bin/bash
 module load rstudio/R-4.3.1
 cd ${OUTDIR}
-Rscript ${RSCRIPT} ${SE_NAME} ${SE_PATH} ${TRAIT_NAME} ${TRAIT_PATH} ${GTF} ${NPERM} ${KLINEAGE}
+Rscript ${RSCRIPT} ${SE_NAME} ${SE_PATH} ${TRAIT_NAME} ${TRAIT_PATH} ${GTF} ${NPERM} ${KLINEAGE} ${PD}
 EOF
 
     qsub -l ncpus=2,mem=15G,walltime=1:00:00 \

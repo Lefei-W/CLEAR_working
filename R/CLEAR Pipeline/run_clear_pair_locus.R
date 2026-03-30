@@ -862,8 +862,22 @@ addLocusCoherence <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, lineage_o
   joint_bin_full <- interaction(tss_bin, density_bin, drop = TRUE)
   joint_bin_full <- as.character(joint_bin_full)
   names(joint_bin_full) <- names(tss_bin)
+<<<<<<< HEAD
 
   cell_lineage <- lineage_obj$cell_lineage
+=======
+  
+  cell_cor <- cor(mat_l2, method = "pearson")
+  hc <- hclust(as.dist(1 - cell_cor), method = "average")
+  lineage_ids <- cutree(hc, k = k_lineage)
+  lineage_labels <- tapply(
+    names(lineage_ids),
+    lineage_ids,
+    function(x) paste(sort(x), collapse = ":")
+  )
+  cell_lineage <- setNames(as.character(lineage_labels[as.character(lineage_ids)]), names(lineage_ids))
+  
+>>>>>>> 0466a99 (update)
   
   locus_results <- compute_locus_rank_concordance_vec(
     gwas_mat = gwas_mat,
@@ -1045,6 +1059,7 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
   
   specificity_summary_l2 <- specificity_summary_l2_detailed %>%
     left_join(specificity_basic, by = "peak")
+<<<<<<< HEAD
 
   if (!is.null(cell_lineage)) {
     dom_lineage <- compute_dominance_lineage(gwas_mat, cell_lineage, ratio_thresh = DEFAULT_RATIO_THRESH) %>%
@@ -1062,6 +1077,8 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
     specificity_summary_l2$dominant_lineage_is_dominant <- NA
   }
 
+=======
+>>>>>>> 0466a99 (update)
   specificity_summary_l2 <- add_gwas_peak_annotation(specificity_summary_l2, snps)
   specificity_summary_l2$locus <- ifelse(
     is.na(specificity_summary_l2$gwas_locus),
@@ -1241,11 +1258,14 @@ if (!all(required_assays %in% assayNames(se))) {
 
 message("  SE:   ", nrow(se), " peaks x ", ncol(se), " cell types")
 
+<<<<<<< HEAD
 message("  Building lineage map from genome-wide raw_l2 and plotting dendrogram")
 lineage_obj <- build_lineage_map(assay(se, "raw_l2"), k_lineage = k_lineage)
 plot_lineage_dendrogram(lineage_obj, se_name, plots_dir)
 
 message("\n--- Step 2: Extract L2 matrix ---")
+=======
+>>>>>>> 0466a99 (update)
 mat_l2 <- assay(se, "raw_l2")
 
 message("\n--- Step 3: GWAS overlap ---")
