@@ -25,24 +25,42 @@ suppressPackageStartupMessages({
 # ---------------------------
 # Source function modules
 # ---------------------------
-script_dir <- dirname(path = "/working/lab_jonathb/lefeiW/projects/CLEAR_2026/Functions/")
+script_dir <- dirname(path = "/mnt/lustre/working/lab_jonathb/lefeiW/projects/CLEAR_2026/Functions")
 functions_dir <- file.path(script_dir, "Functions")
 
 for (f in list.files(functions_dir, pattern = "\\.R$", full.names = TRUE)) {
   source(f, local = FALSE)
 }
-source('se_preparation.R')
+
 # ===========================================================
-# USER INPUTS — edit these before running
+# INPUT MODE
+# ----------------------------------------------------------
+# CLI:         Rscript run_clear_pair_locus_runner.R <se_name> <se_path> <trait_name> <trait_path> [gtf_path] [n_perm] [k_lineage] [processed_dir]
+# Interactive: edit the defaults below, then call run_clear()
 # ===========================================================
-se_name       <- "breast_full_330k"          # e.g. "Breast 330k"
-se_path       <- "/working/lab_jonathb/lefeiW/projects/CLEAR_data/snATAC_ArchR_PeakMatrix/breast_330017peak.rds"        # snATAC SE .rds
-trait_name    <- "BCAC_FM"            # e.g. "Schizophrenia"
-trait_path    <- "/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/BCAC_FineMapping.rds"     # full path to GWAS trait GRanges .rds
-gtf_path      <- "/working/lab_jonathb/lefeiW/projects/CLEAR_data/gencode.v46.chr_patch_hapl_scaff.basic.annotation.gtf.gz"
-n_perm        <- 1000L
-k_lineage     <- 4L
-processed_dir <- file.path(dirname(dirname(getwd())), "processed_data")
+args <- commandArgs(TRUE)
+
+if (length(args) >= 4) {
+  # --- Command-line mode ---
+  se_name       <- args[1]
+  se_path       <- args[2]
+  trait_name    <- args[3]
+  trait_path    <- args[4]
+  gtf_path      <- if (length(args) >= 5) args[5] else "/working/lab_jonathb/lefeiW/projects/CLEAR_data/gencode.v46.chr_patch_hapl_scaff.basic.annotation.gtf.gz"
+  n_perm        <- if (length(args) >= 6) as.integer(args[6]) else 1000L
+  k_lineage     <- if (length(args) >= 7) as.integer(args[7]) else 4L
+  processed_dir <- if (length(args) >= 8) args[8] else file.path(dirname(dirname(getwd())), "processed_data")
+} else {
+  # --- Interactive / RStudio mode: edit these ---
+  se_name       <- "breast_full_330k"
+  se_path       <- "../../../CLEAR_data/snATAC_ArchR_PeakMatrix/breast_330017peak.rds"
+  trait_name    <- "BCAC_FM"
+  trait_path    <- "/working/lab_jonathb/lefeiW/projects/ATAC_BCAC/data/BCAC_FM_GR.rds"
+  gtf_path      <- "/working/lab_jonathb/lefeiW/projects/CLEAR_data/gencode.v46.chr_patch_hapl_scaff.basic.annotation.gtf.gz"
+  n_perm        <- 1000L
+  k_lineage     <- 4L
+  processed_dir <- file.path(dirname(dirname(getwd())), "processed_data")
+}
 
 # ===========================================================
 # run_clear()
@@ -191,4 +209,9 @@ run_clear <- function() {
   invisible(NULL)
 }
 
-message("Ready. Set your USER INPUTS above, then call run_clear()")
+# Auto-run when called from command line; print instructions in interactive mode
+if (length(commandArgs(TRUE)) >= 4) {
+  run_clear()
+} else {
+  message("Ready. Edit the USER INPUTS in the 'Interactive' block, then call run_clear()")
+}

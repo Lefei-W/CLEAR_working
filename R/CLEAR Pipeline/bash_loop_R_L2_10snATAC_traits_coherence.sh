@@ -4,15 +4,9 @@
 
 WD=/working/lab_jonathb/lefeiW/projects/CLEAR_2026
 SD=${WD}/jobs
-<<<<<<< HEAD
-OD=${WD}/output_19-03
+OD=${WD}/output_30-03
 PD=${WD}/processed_data
-RSCRIPT=${WD}/R/run_clear_pair_locus_18-03.R
-=======
-OD=${WD}/output
-PD=${WD}/processed_data
-RSCRIPT=${WD}/R/run_clear_pair_locus.R
->>>>>>> 0466a99 (update)
+RSCRIPT=${WD}/R/run_clear_pair_locus_runner.R
 GTF=/working/lab_jonathb/lefeiW/projects/CLEAR_data/gencode.v46.chr_patch_hapl_scaff.basic.annotation.gtf.gz
 NPERM=1000
 KLINEAGE=4
