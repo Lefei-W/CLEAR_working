@@ -207,7 +207,7 @@ plot_assay_cor_heatmaps <- function(se, tissue, plot_dir = "plots") {
   invisible(out)
 }
 
-plot_assay_densities <- function(se, tissue, plot_dir = "plots") {
+plot_assay_densities <- function(se, tissue, plot_dir = "plots", lineage_palette = NULL) {
   out <- file.path(plot_dir, tissue)
   dir.create(out, recursive = TRUE, showWarnings = FALSE)
   avail <- intersect(PLOT_ASSAYS, assayNames(se))
@@ -222,13 +222,18 @@ plot_assay_densities <- function(se, tissue, plot_dir = "plots") {
   long <- do.call(rbind, long_list)
   long$assay <- factor(long$assay, levels = avail)
   
-  n_ct_dens <- length(unique(long$cell_type))
-  if (n_ct_dens <= 10) {
-    colour_scale <- ggsci::scale_color_npg()
-  } else if (n_ct_dens <= 20) {
-    colour_scale <- ggsci::scale_color_d3(palette = "category20")
+  ct_names <- unique(long$cell_type)
+  if (!is.null(lineage_palette) && all(ct_names %in% names(lineage_palette))) {
+    colour_scale <- scale_color_manual(values = lineage_palette)
   } else {
-    colour_scale <- ggsci::scale_color_igv()
+    n_ct_dens <- length(ct_names)
+    if (n_ct_dens <= 10) {
+      colour_scale <- ggsci::scale_color_npg()
+    } else if (n_ct_dens <= 20) {
+      colour_scale <- ggsci::scale_color_d3(palette = "category20")
+    } else {
+      colour_scale <- ggsci::scale_color_igv()
+    }
   }
   
   p <- ggplot(long, aes(x = value, colour = cell_type)) +
@@ -302,14 +307,60 @@ build_lineage_map <- function(mat_l2, k_lineage = 4L) {
   )
   cell_lineage <- setNames(as.character(lineage_labels[as.character(lineage_ids)]), names(lineage_ids))
 
+  palette <- build_lineage_palette(lineage_ids)
+
   list(
     cell_cor = cell_cor,
     hc = hc,
     lineage_ids = lineage_ids,
     lineage_labels = lineage_labels,
     cell_lineage = cell_lineage,
-    k_lineage = k_lineage
+    k_lineage = k_lineage,
+    palette = palette
   )
+}
+
+# Hierarchical colour palette: one master hue per lineage, shades per cell type
+# Supports up to 8 lineages x 8 cell types each
+build_lineage_palette <- function(lineage_ids) {
+  # Master hues (up to 8 lineages)
+  master_hues <- c(
+    "#2166AC",  # blue
+    "#B2182B",  # red
+    "#1B7837",  # green
+    "#E08214",  # orange
+    "#6A3D9A",  # purple
+    "#A6761D",  # brown
+    "#E7298A",  # pink
+    "#66C2A5"   # teal
+  )
+
+  groups <- split(names(lineage_ids), lineage_ids)
+  n_groups <- length(groups)
+  if (n_groups > length(master_hues)) {
+    master_hues <- c(master_hues, grDevices::hcl.colors(n_groups - length(master_hues), "Set2"))
+  }
+
+  pal <- character()
+  for (i in seq_along(groups)) {
+    cts <- sort(groups[[i]])
+    n_ct <- length(cts)
+    if (n_ct == 1L) {
+      shades <- master_hues[i]
+    } else {
+      # Generate shades from dark to light within each master hue
+      base_rgb <- grDevices::col2rgb(master_hues[i]) / 255
+      alphas <- seq(1.0, 0.35, length.out = n_ct)
+      shades <- vapply(alphas, function(a) {
+        blended <- base_rgb * a + 1 * (1 - a)  # blend toward white
+        grDevices::rgb(blended[1], blended[2], blended[3])
+      }, character(1))
+    }
+    names(shades) <- cts
+    pal <- c(pal, shades)
+  }
+
+  pal
 }
 
 plot_lineage_dendrogram <- function(lineage_obj, se_name, plot_dir = "plots") {
@@ -339,7 +390,8 @@ plot_celltype_stackbars <- function(
     cumvar_threshold = 0.8,
     max_k = 3,
     outfile,
-    max_peaks = 200) {
+    max_peaks = 200,
+    lineage_palette = NULL) {
   stopifnot(!missing(outfile))
   
   if (!value_metric %in% assayNames(se_overlap)) {
@@ -441,7 +493,9 @@ plot_celltype_stackbars <- function(
   n_sel <- length(sel)
   n_ct <- length(ct_levels)
   
-  if (n_ct <= 10) {
+  if (!is.null(lineage_palette) && all(ct_levels %in% names(lineage_palette))) {
+    fill_scale <- scale_fill_manual(values = lineage_palette)
+  } else if (n_ct <= 10) {
     fill_scale <- ggsci::scale_fill_npg()
   } else if (n_ct <= 20) {
     fill_scale <- ggsci::scale_fill_d3(palette = "category20")
@@ -529,7 +583,8 @@ compute_specificity_summary <- function(mat_l2, cell_cor = NULL, ratio_thresh = 
 
 dominance_dodge_plot <- function(genome_mat, gwas_mat,
                                  ratio_thresh = DEFAULT_RATIO_THRESH,
-                                 title_label  = "") {
+                                 title_label  = "",
+                                 lineage_palette = NULL) {
   dom_genome <- compute_dominance(genome_mat, ratio_thresh = ratio_thresh)
   dom_gwas   <- compute_dominance(gwas_mat,   ratio_thresh = ratio_thresh)
   
@@ -557,7 +612,7 @@ dominance_dodge_plot <- function(genome_mat, gwas_mat,
     dplyr::arrange(proportion) %>% dplyr::pull(maximum_ct)
   df$maximum_ct <- factor(df$maximum_ct, levels = ct_order)
   
-  ggplot(df, aes(x = maximum_ct, y = proportion, fill = set)) +
+  p <- ggplot(df, aes(x = maximum_ct, y = proportion, fill = set)) +
     geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
     geom_text(aes(label = bar_label),
               position = position_dodge(width = 0.8), hjust = -0.05, size = 2.8) +
@@ -573,6 +628,16 @@ dominance_dodge_plot <- function(genome_mat, gwas_mat,
       y    = "Proportion within dominant peaks",
       fill = "Peak set"
     )
+
+  # Add lineage-coloured annotation strip on the y-axis
+  if (!is.null(lineage_palette)) {
+    ct_cols <- lineage_palette[levels(df$maximum_ct)]
+    ct_cols <- ct_cols[!is.na(ct_cols)]
+    if (length(ct_cols)) {
+      p <- p + theme(axis.text.y = element_text(colour = ct_cols))
+    }
+  }
+  p
 }
 
 compute_dominance_lineage <- function(mat, cell_lineage, ratio_thresh = 2) {
@@ -703,6 +768,199 @@ make_density_bins <- function(density_vec, nbins = 4) {
     breaks = unique(quantile(density_vec, probs = seq(0, 1, length.out = nbins + 1), na.rm = TRUE)),
     include.lowest = TRUE
   )
+}
+
+prepare_peak_annotations <- function(se, gtf, gwas_mat, specificity_summary_GWAS = NULL,
+                                     density_window = 50000,
+                                     max_locus_distance = 100000) {
+  peaks_gr <- rowRanges(se)
+  peak_names <- names(peaks_gr)
+
+  tss_gr <- get_tss(gtf)
+  nearest_hits <- distanceToNearest(peaks_gr, tss_gr)
+
+  dist_to_tss <- mcols(nearest_hits)$distance
+  names(dist_to_tss) <- peak_names[queryHits(nearest_hits)]
+  mcols(peaks_gr)$dist_to_tss <- dist_to_tss[peak_names]
+
+  tss_bins <- cut(
+    dist_to_tss,
+    breaks = c(0, 1000, 5000, 50000, 200000, Inf),
+    labels = c("core_prom", "prox_prom", "near_reg", "distal", "long_range"),
+    include.lowest = TRUE
+  )
+  names(tss_bins) <- peak_names
+  tss_bins_gwas <- tss_bins[rownames(gwas_mat)]
+
+  density_vec <- compute_peak_density(peaks_gr, window = density_window)
+  names(density_vec) <- peak_names
+
+  density_bins <- cut(
+    density_vec,
+    breaks = unique(quantile(density_vec, probs = seq(0, 1, length.out = 10))),
+    include.lowest = TRUE
+  )
+  names(density_bins) <- peak_names
+
+  joint_bins <- interaction(tss_bins, density_bins, drop = TRUE)
+  joint_bins <- as.character(joint_bins)
+  names(joint_bins) <- peak_names
+
+  peaks_sorted <- sort(peaks_gr)
+  same_chr <- as.character(seqnames(peaks_sorted)[-1]) ==
+    as.character(seqnames(peaks_sorted)[-length(peaks_sorted)])
+  close_peaks <- diff(start(peaks_sorted)) <= max_locus_distance
+  cluster_id <- cumsum(c(1, !(close_peaks & same_chr)))
+  locus_ids <- paste0("locus_", cluster_id)
+  names(locus_ids) <- names(peaks_sorted)
+  locus_ids_full <- locus_ids[peak_names]
+  peak_to_locus_full <- setNames(locus_ids_full, peak_names)
+
+  if (!is.null(specificity_summary_GWAS) && "gwas_locus" %in% names(specificity_summary_GWAS)) {
+    peak_to_locus_gwas <- specificity_summary_GWAS$gwas_locus
+    names(peak_to_locus_gwas) <- specificity_summary_GWAS$peak
+  } else {
+    peak_to_locus_gwas <- setNames(as.character(rowData(se[rownames(gwas_mat),])$signal), rownames(gwas_mat))
+  }
+
+  peak_annot <- data.frame(
+    peak = peak_names,
+    dist_to_tss = dist_to_tss[peak_names],
+    density = density_vec[peak_names],
+    tss_bin = as.character(tss_bins[peak_names]),
+    density_bin = as.character(density_bins[peak_names]),
+    joint_bin = joint_bins[peak_names],
+    locus = locus_ids_full,
+    stringsAsFactors = FALSE
+  )
+
+  list(
+    peak_annot = peak_annot,
+    peak_to_locus_full = peak_to_locus_full,
+    peak_to_locus_gwas = peak_to_locus_gwas,
+    tss_bins_full = tss_bins,
+    tss_bins_gwas = tss_bins_gwas,
+    density_vec = density_vec,
+    density_bins = density_bins,
+    joint_bins = joint_bins
+  )
+}
+
+dominance_consensus <- function(specificity_matrix, peak_weights, group_labels) {
+  cell_types <- colnames(specificity_matrix)
+  groups     <- group_labels[cell_types]
+
+  group_sums <- lapply(unique(groups), function(g) {
+    cols <- cell_types[groups == g]
+    rowSums(specificity_matrix[, cols, drop = FALSE])
+  }) %>%
+    setNames(unique(groups)) %>% as.data.frame()
+
+  top_group_per_peak <- apply(group_sums, 1, function(x) names(which.max(x)))
+  peak_spec_weight <- apply(group_sums, 1, max)
+  peak_weighted_spec <- peak_spec_weight * peak_weights
+
+  group_totals  <- tapply(peak_weighted_spec, top_group_per_peak, sum)
+  top_group     <- names(which.max(group_totals))
+  consensus     <- group_totals[top_group] / sum(group_totals)
+
+  list(
+    consensus    = unname(consensus),
+    top_group    = top_group,
+    group_totals = sort(group_totals / sum(group_totals), decreasing = TRUE)
+  )
+}
+
+compute_locus_consensus_concordance_vec <- function(
+    gwas_mat,
+    full_mat,
+    l2_weights,
+    peak_to_locus,
+    peak_to_locus_full,
+    joint_bin_full,
+    cell_lineage,
+    n_perm = 100
+) {
+  locus_to_peaks_full <- split(names(peak_to_locus_full), peak_to_locus_full)
+  all_bins <- sort(unique(joint_bin_full))
+
+  message("precomputing bin counts per locus (consensus)...")
+  locus_bin_mat <- t(sapply(locus_to_peaks_full, function(peaks) {
+    tab <- table(factor(joint_bin_full[peaks], levels = all_bins))
+    as.numeric(tab)
+  }))
+  rownames(locus_bin_mat) <- names(locus_to_peaks_full)
+  locus_bin_prop <- locus_bin_mat / rowSums(locus_bin_mat)
+
+  gwas_loci_full <- unique(peak_to_locus_full[rownames(gwas_mat)])
+  non_gwas_loci <- setdiff(names(locus_to_peaks_full), gwas_loci_full)
+
+  locus_split <- split(rownames(gwas_mat), peak_to_locus[rownames(gwas_mat)])
+
+  group_labels <- setNames(colnames(gwas_mat), colnames(gwas_mat))
+
+  results <- lapply(names(locus_split), function(locus) {
+    message(paste0("calculating consensus coherence for ", locus, "..."))
+    peaks <- locus_split[[locus]]
+    k <- length(peaks)
+
+    if (k < 2) {
+      return(data.frame(
+        locus = locus, n_peaks = k,
+        consensus_fine = NA_real_, consensus_lineage = NA_real_,
+        perm_mean = NA_real_, perm_sd = NA_real_,
+        z_score = NA_real_, p_value = NA_real_,
+        dominant_cell_consensus = NA_character_,
+        dominant_lineage_consensus = NA_character_,
+        stringsAsFactors = FALSE))
+    }
+
+    fine_obs <- dominance_consensus(gwas_mat[peaks, , drop = FALSE], l2_weights[peaks], group_labels)
+    fine_obs_conc <- fine_obs$consensus
+    fine_top_cell <- fine_obs$top_group
+
+    lineage_obs <- dominance_consensus(gwas_mat[peaks, , drop = FALSE], l2_weights[peaks], cell_lineage)
+    lineage_obs_conc <- lineage_obs$consensus
+    lineage_top_grp  <- lineage_obs$top_group
+
+    locus_joint_bins <- joint_bin_full[peaks]
+
+    perm_vals <- replicate(n_perm, {
+      valid_loci <- non_gwas_loci[sapply(locus_to_peaks_full[non_gwas_loci], length) >= k]
+      if (length(valid_loci) == 0) return(NA)
+
+      lb <- table(factor(locus_joint_bins, levels = all_bins))
+      lb <- as.numeric(lb) / sum(lb)
+      candidate_mat <- locus_bin_prop[valid_loci, , drop = FALSE]
+      dists <- rowSums(abs(candidate_mat - matrix(lb, nrow = nrow(candidate_mat), ncol = length(lb), byrow = TRUE)))
+
+      top_n <- min(20, length(valid_loci))
+      best_loci <- valid_loci[order(dists)][seq_len(top_n)]
+      sampled_locus <- sample(best_loci, 1)
+      sampled_peaks <- sample(locus_to_peaks_full[[sampled_locus]], k)
+
+      m <- full_mat[sampled_peaks, , drop = FALSE]
+      dominance_consensus(m, l2_weights[sampled_peaks], group_labels)$consensus
+    })
+
+    perm_mean <- mean(perm_vals, na.rm = TRUE)
+    perm_sd   <- sd(perm_vals, na.rm = TRUE)
+    n_perm_eff <- sum(!is.na(perm_vals))
+    z_score <- if (is.na(perm_sd) || perm_sd == 0) NA_real_ else (fine_obs_conc - perm_mean) / perm_sd
+    p_value <- if (n_perm_eff > 0) sum(perm_vals >= fine_obs_conc, na.rm = TRUE) / n_perm_eff else NA_real_
+
+    data.frame(
+      locus = locus, n_peaks = k,
+      consensus_fine = fine_obs_conc,
+      consensus_lineage = lineage_obs_conc,
+      perm_mean = perm_mean, perm_sd = perm_sd,
+      z_score = z_score, p_value = p_value,
+      dominant_cell_consensus = fine_top_cell,
+      dominant_lineage_consensus = lineage_top_grp,
+      stringsAsFactors = FALSE)
+  })
+
+  do.call(rbind, results)
 }
 
 compute_locus_rank_concordance_vec <- function( # Whether peaks in the same GWAS locus show more silimar cell type ranking patterns 
@@ -862,22 +1120,8 @@ addLocusCoherence <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, lineage_o
   joint_bin_full <- interaction(tss_bin, density_bin, drop = TRUE)
   joint_bin_full <- as.character(joint_bin_full)
   names(joint_bin_full) <- names(tss_bin)
-<<<<<<< HEAD
 
   cell_lineage <- lineage_obj$cell_lineage
-=======
-  
-  cell_cor <- cor(mat_l2, method = "pearson")
-  hc <- hclust(as.dist(1 - cell_cor), method = "average")
-  lineage_ids <- cutree(hc, k = k_lineage)
-  lineage_labels <- tapply(
-    names(lineage_ids),
-    lineage_ids,
-    function(x) paste(sort(x), collapse = ":")
-  )
-  cell_lineage <- setNames(as.character(lineage_labels[as.character(lineage_ids)]), names(lineage_ids))
-  
->>>>>>> 0466a99 (update)
   
   locus_results <- compute_locus_rank_concordance_vec(
     gwas_mat = gwas_mat,
@@ -901,6 +1145,60 @@ addLocusCoherence <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, lineage_o
   
   write.table(locus_results, file.path(results_dir, "locus_concordance_permutation.txt"), sep = "\t", quote = FALSE, row.names = FALSE)
   locus_results
+}
+
+addLocusCoherence_consensus <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path, lineage_obj, n_perm, results_dir, specificity_summary_l2 = NULL) {
+  if (!nrow(gwas_mat)) return(data.frame())
+  if (!file.exists(gtf_path)) {
+    message("  Skipping consensus locus analysis: GTF file not found at ", gtf_path)
+    return(data.frame())
+  }
+
+  gtf <- rtracklayer::import(gtf_path)
+
+  peak_annotation <- prepare_peak_annotations(
+    se = se, gtf = gtf, gwas_mat = gwas_mat,
+    specificity_summary_GWAS = specificity_summary_l2
+  )
+
+  # Use signal-based locus mapping when specificity_summary not available
+  peak_to_locus_gwas <- peak_annotation$peak_to_locus_gwas
+  if (is.null(peak_to_locus_gwas) || all(is.na(peak_to_locus_gwas))) {
+    peak_to_locus_gwas <- setNames(as.character(rowData(se_gwas)$signal), rownames(se_gwas))
+  }
+
+  raw_mat <- assay(se, "raw")
+  if (inherits(raw_mat, "Matrix")) raw_mat <- as.matrix(raw_mat)
+  l2_weights <- rowMeans(raw_mat)
+
+  cell_lineage <- lineage_obj$cell_lineage
+
+  locus_results_consensus <- compute_locus_consensus_concordance_vec(
+    gwas_mat = gwas_mat,
+    full_mat = mat_l2,
+    l2_weights = l2_weights,
+    peak_to_locus = peak_to_locus_gwas,
+    peak_to_locus_full = peak_annotation$peak_to_locus_full,
+    joint_bin_full = peak_annotation$joint_bins,
+    cell_lineage = cell_lineage,
+    n_perm = n_perm
+  )
+
+  if (!nrow(locus_results_consensus)) return(data.frame())
+
+  locus_results_consensus$significant <- locus_results_consensus$p_value < 0.05
+  locus_results_consensus$category <- dplyr::case_when(
+    locus_results_consensus$n_peaks == 1 ~ "Single_peak",
+    locus_results_consensus$z_score > 2 & locus_results_consensus$p_value < 0.05 &
+      locus_results_consensus$consensus_lineage > 0.5 ~ "Highly_coherent_specific",
+    locus_results_consensus$z_score > 2 & locus_results_consensus$p_value < 0.05 ~ "Coherent_moderate",
+    locus_results_consensus$z_score < 1 ~ "Incoherent",
+    TRUE ~ "Intermediate"
+  )
+
+  write.table(locus_results_consensus, file.path(results_dir, "locus_concordance_consensus_permutation.txt"),
+              sep = "\t", quote = FALSE, row.names = FALSE)
+  locus_results_consensus
 }
 
 add_gwas_peak_annotation <- function(summary_df, snps) {
@@ -1059,7 +1357,6 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
   
   specificity_summary_l2 <- specificity_summary_l2_detailed %>%
     left_join(specificity_basic, by = "peak")
-<<<<<<< HEAD
 
   if (!is.null(cell_lineage)) {
     dom_lineage <- compute_dominance_lineage(gwas_mat, cell_lineage, ratio_thresh = DEFAULT_RATIO_THRESH) %>%
@@ -1077,8 +1374,6 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
     specificity_summary_l2$dominant_lineage_is_dominant <- NA
   }
 
-=======
->>>>>>> 0466a99 (update)
   specificity_summary_l2 <- add_gwas_peak_annotation(specificity_summary_l2, snps)
   specificity_summary_l2$locus <- ifelse(
     is.na(specificity_summary_l2$gwas_locus),
@@ -1099,8 +1394,8 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
   specificity_summary_l2
 }
 
-plot_dominance <- function(mat_l2, gwas_mat, se_name, trait_name, plots_dir) {
-  p_dom_l2 <- dominance_dodge_plot(mat_l2, gwas_mat, title_label = "L2mat")
+plot_dominance <- function(mat_l2, gwas_mat, se_name, trait_name, plots_dir, lineage_palette = NULL) {
+  p_dom_l2 <- dominance_dodge_plot(mat_l2, gwas_mat, title_label = "L2mat", lineage_palette = lineage_palette)
   ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_dominance_l2.pdf")), p_dom_l2, width = 8, height = 6)
   invisible(p_dom_l2)
 }
@@ -1174,6 +1469,99 @@ plot_coherence <- function(locus_results, se_name, trait_name, plots_dir) {
   
   ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_locus_concordance_category.pdf")), p_locus_cat, width = 8, height = 6)
   invisible(p_locus_cat)
+}
+
+plot_coherence_consensus <- function(locus_results_consensus, se_name, trait_name, plots_dir) {
+  if (!nrow(locus_results_consensus)) return(invisible(NULL))
+
+  plot_df <- locus_results_consensus %>%
+    dplyr::filter(n_peaks > 1) %>%
+    dplyr::mutate(
+      neg_log10_p = -log10(p_value),
+      dominant_lineage_consensus = as.character(dominant_lineage_consensus),
+      category = factor(
+        category,
+        levels = c("Highly_coherent_specific", "Coherent_moderate", "Intermediate", "Incoherent", "Single_peak")
+      )
+    ) %>%
+    dplyr::filter(is.finite(neg_log10_p))
+
+  if (!nrow(plot_df)) return(invisible(NULL))
+
+  y_cap <- as.numeric(stats::quantile(plot_df$neg_log10_p, probs = 0.99, na.rm = TRUE))
+  y_cap <- max(y_cap, -log10(0.05) + 0.2)
+
+  # Consensus fine vs p-value (category coloured)
+  p_consensus_cat <- ggplot(plot_df, aes(x = consensus_fine, y = neg_log10_p)) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", linewidth = 0.55, color = "gray35") +
+    geom_point(aes(size = n_peaks, color = category, shape = dominant_lineage_consensus), alpha = 0.88) +
+    scale_color_manual(
+      values = c(
+        Highly_coherent_specific = "#C43C39",
+        Coherent_moderate = "#E7965A",
+        Intermediate = "#5A5A5A",
+        Incoherent = "#2F78B7",
+        Single_peak = "#bdbdbd"
+      ),
+      drop = FALSE
+    ) +
+    scale_shape_discrete(name = "Dominant lineage") +
+    scale_size_continuous(range = c(2.3, 8.2), breaks = c(2, 5, 10, 20, 30)) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "right",
+      plot.title = element_text(face = "bold", size = 13),
+      plot.subtitle = element_text(color = "gray30", size = 10),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, color = "gray40", linewidth = 0.45)
+    ) +
+    labs(
+      x = "Weighted consensus (cell type)",
+      y = "-log10(p-value)",
+      title = paste0(se_name, " x ", trait_name, " - Consensus locus concordance"),
+      subtitle = paste0("Loci with >1 peak: n = ", nrow(plot_df)),
+      color = "Category", shape = "Dominant lineage", size = "N peaks"
+    )
+  ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_locus_concordance_consensus.pdf")),
+         p_consensus_cat, width = 8, height = 6)
+
+  # Lineage consensus vs p-value
+  p_consensus_lineage <- ggplot(plot_df, aes(x = consensus_lineage, y = neg_log10_p)) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+    geom_point(aes(size = n_peaks, color = category), alpha = 0.8) +
+    scale_color_manual(
+      values = c(
+        Highly_coherent_specific = "#C43C39",
+        Coherent_moderate = "#E7965A",
+        Intermediate = "#5A5A5A",
+        Incoherent = "#2F78B7",
+        Single_peak = "#bdbdbd"
+      ),
+      drop = FALSE
+    ) +
+    theme_bw() + ggsci::scale_color_igv() +
+    labs(
+      x = "Weighted consensus (lineage)",
+      y = "-log10(p-value)",
+      title = paste0(se_name, " x ", trait_name, " - Lineage consensus concordance")
+    )
+  ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_locus_concordance_consensus_lineage.pdf")),
+         p_consensus_lineage, width = 8, height = 6)
+
+  # Z-score vs n_peaks
+  p_consensus_z <- ggplot(plot_df, aes(y = z_score, x = n_peaks)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    geom_point(aes(color = dominant_lineage_consensus, shape = category), alpha = 0.8) +
+    theme_bw() + ggsci::scale_color_igv() +
+    labs(
+      x = "Number of GWAS peaks",
+      y = "Z score (consensus)",
+      title = paste0(se_name, " x ", trait_name, " - Consensus Z-scores")
+    )
+  ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_locus_zscore_consensus.pdf")),
+         p_consensus_z, width = 8, height = 6)
+
+  invisible(list(category = p_consensus_cat, lineage = p_consensus_lineage, zscore = p_consensus_z))
 }
 
 
@@ -1258,14 +1646,11 @@ if (!all(required_assays %in% assayNames(se))) {
 
 message("  SE:   ", nrow(se), " peaks x ", ncol(se), " cell types")
 
-<<<<<<< HEAD
 message("  Building lineage map from genome-wide raw_l2 and plotting dendrogram")
 lineage_obj <- build_lineage_map(assay(se, "raw_l2"), k_lineage = k_lineage)
 plot_lineage_dendrogram(lineage_obj, se_name, plots_dir)
 
 message("\n--- Step 2: Extract L2 matrix ---")
-=======
->>>>>>> 0466a99 (update)
 mat_l2 <- assay(se, "raw_l2")
 
 message("\n--- Step 3: GWAS overlap ---")
@@ -1281,10 +1666,10 @@ if (nrow(gwas_mat) > 0) {
 
 message("\n--- Step 4: Correlation heatmaps and densities ---")
 plot_assay_cor_heatmaps(se, se_name, plots_dir)
-plot_assay_densities(se, se_name, plots_dir)
+plot_assay_densities(se, se_name, plots_dir, lineage_palette = lineage_obj$palette)
 if (nrow(gwas_mat) > 1) {
   plot_assay_cor_heatmaps(se_gwas, paste0(se_name, "_", trait_name, "_GWAS"), plots_dir)
-  plot_assay_densities(se_gwas, paste0(se_name, "_", trait_name, "_GWAS"), plots_dir)
+  plot_assay_densities(se_gwas, paste0(se_name, "_", trait_name, "_GWAS"), plots_dir, lineage_palette = lineage_obj$palette)
 }
 
 message("\n--- Step 5: Input summary ---")
@@ -1299,23 +1684,34 @@ plot_celltype_stackbars(
   se_gwas,
   value_metric = "raw_l2",
   cumvar_threshold = 0.5,
-  outfile = file.path(plots_dir, paste0(se_name, "_", trait_name, "_stackbars_l2_cum50.pdf"))
+  outfile = file.path(plots_dir, paste0(se_name, "_", trait_name, "_stackbars_l2_cum50.pdf")),
+  lineage_palette = lineage_obj$palette
 )
 plot_celltype_stackbars(
   se_gwas,
   value_metric = "raw_l2",
   cumvar_threshold = 0.8,
-  outfile = file.path(plots_dir, paste0(se_name, "_", trait_name, "_stackbars_l2_cum80.pdf"))
+  outfile = file.path(plots_dir, paste0(se_name, "_", trait_name, "_stackbars_l2_cum80.pdf")),
+  lineage_palette = lineage_obj$palette
 )
 
 message("\n--- Step 7: Dominance plots ---")
-plot_dominance(mat_l2, gwas_mat, se_name, trait_name, plots_dir)
+plot_dominance(mat_l2, gwas_mat, se_name, trait_name, plots_dir, lineage_palette = lineage_obj$palette)
 plot_domiance_lineage(mat_l2, gwas_mat, lineage_obj$cell_lineage, se_name, trait_name, plots_dir)
 
 message("\n--- Step 8: Locus-level permutation concordance ---")
 locus_results <- addLocusCoherence(se, se_gwas, mat_l2, gwas_mat, gtf_path, lineage_obj, n_perm, results_dir)
 if (nrow(locus_results)) {
   plot_coherence(locus_results, se_name, trait_name, plots_dir)
+}
+
+message("\n--- Step 8b: Locus-level consensus concordance ---")
+locus_results_consensus <- addLocusCoherence_consensus(
+  se, se_gwas, mat_l2, gwas_mat, gtf_path, lineage_obj, n_perm, results_dir,
+  specificity_summary_l2 = specificity_summary_l2
+)
+if (nrow(locus_results_consensus)) {
+  plot_coherence_consensus(locus_results_consensus, se_name, trait_name, plots_dir)
 }
 
 message("\n--- Step 9: Global rank-based enrichment (L2) ---")
