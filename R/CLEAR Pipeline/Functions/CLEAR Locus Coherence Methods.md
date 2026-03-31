@@ -57,9 +57,9 @@ $$\text{Concordance} = \frac{2}{k(k-1)} \sum_{i < j} \rho_{ij}$$
 | 0.0 | No systematic agreement (random) |
 | −1.0 | Peaks rank cell types in opposite orders |
 
-A locus can have high concordance even if no single cell type dominates — what matters is that peaks **agree on the relative ordering** (e.g., all peaks rank cell A > cell C > cell B).
+A locus can have high concordance even if no single cell type dominates (referring back of worth to only apply for those peaks with dominant cell type/linegae). Only focuses whether peaks **agree on the relative ordering** (e.g., all peaks rank cell A > cell C > cell B).
 
-### Dominant cell type annotation
+### Dominant cell type annotation (locus specific dominant cell type/lineage)
 
 The dominant cell type is identified from the **mean L2 specificity profile** across the locus peaks:
 
@@ -70,6 +70,29 @@ $$\text{dominant cell} = \arg\max_c \; \bar{s}_c$$
 Lineage-level dominance sums $\bar{s}_c$ within each lineage group $g$:
 
 $$L_g = \sum_{c \in g} \bar{s}_c, \qquad \text{lineage fraction} = \frac{\max_g L_g}{\sum_g L_g}$$
+
+Kind of making sense to calculate per-locus dominant cell type and lineage, but we are examining if the locus is coherent or not... feel like we are already making assumptions. How can we just use the results from the peak-level summary of the same dominant?
+
+#### Discussion: locus-level vs peak-level dominance & peak filtering
+
+The locus-level dominant cell type (`argmax(colMeans(L2))`) is conceptually different from peak-level dominance (`top1/second ≥ 2`). The locus-level version always returns a winner — even when the margin is thin — because it's just the argmax of an average profile. The peak-level ratio test is stricter: many peaks fail it precisely because closely related cell types (e.g., two subtypes of excitatory neurons) have near-equal L2 scores, making top-1 and top-2 almost tied.
+
+At **lineage level**, merging those related cell types into one group resolves this tie — both subtypes contribute to the same lineage sum, so more peaks become "dominant" in the lineage sense. This is expected behaviour and is actually a feature of the lineage grouping: it captures the biological reality that specificity is often at the lineage level, not the fine cell-type level.
+
+However, including **non-specific peaks** (flat L2 profiles with no clear winner) in the concordance calculation is problematic:
+- Their within-peak rankings are essentially arbitrary (small differences in near-zero L2 values).
+- Pairwise Spearman between a specific peak and a non-specific peak will be low by noise, not biology.
+- This dilutes the concordance signal — a locus with 3 highly specific peaks and 2 non-specific peaks may score lower than it should.
+
+**Options to consider:**
+1. **Pre-filter peaks by peak-level specificity** before computing concordance — e.g., only include peaks where `max(L2) > threshold` or where the peak-level ratio test passes. This focuses the question on "do the *specific* peaks agree?" but reduces k and therefore statistical power.
+2. **Weight peaks by their specificity** (as the consensus method already does via $w_i = G_{ig_i^*} \times \bar{a}_i$). The rank concordance method currently treats all peaks equally — a weighted version could down-weight non-specific peaks.
+3. **Keep all peaks but report peak-level dominance stats alongside** — e.g., annotate each locus with how many of its peaks are dominant at peak-level (ratio ≥ 2) vs non-dominant. This lets downstream analysis stratify loci by "proportion of dominant peaks" without discarding data upfront.
+4. **Use the peak-level dominant cell type as the locus label** (majority vote of peak-level dominant calls, excluding non-dominant peaks) instead of the mean-profile argmax. This would avoid re-defining dominance at the locus level, but requires enough peaks to pass the ratio test.
+
+The simplest justification for the current approach: the mean L2 profile argmax is not really a "dominance" call — it's just an annotation label for colouring/shaping plots. The coherence score itself (Spearman rho) already captures whether the locus is coherent. The dominant cell type label says "if this locus is coherent, *which* cell type is it coherent toward?" — the label is interpretable only when concordance is high. When concordance is low, the label is meaningless anyway.
+
+Still, filtering to highly specific peaks (high max L2) or at least stratifying results by peak-level specificity would strengthen the biological interpretation. A locus where 5/5 peaks are specific to the same cell type is more convincing than one where 2/5 peaks are specific and the other 3 have flat profiles but happen to correlate.
 
 ### Locus categorisation (rank concordance)
 
