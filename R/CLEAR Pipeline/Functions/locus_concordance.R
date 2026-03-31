@@ -7,25 +7,11 @@
 # This file contains two complementary locus-level coherence methods:
 #
 # 1. RANK CONCORDANCE (compute_locus_rank_concordance_vec)
-#    - For each locus, ranks every peak's L2-specificity vector across cell types
-#    - Computes pairwise Spearman correlations between peaks (on the transposed rank matrix)
-#    - Locus score = mean of all pairwise Spearman rho values
-#    - Captures whether peaks agree on the FULL ORDERING of cell types
-#    - Range: -1 (perfectly discordant) to +1 (identical rankings)
-#    - Metric: mean pairwise Spearman rho
-#
+
 # 2. CONSENSUS CONCORDANCE (compute_locus_consensus_concordance_vec)
-#    - Uses dominance_consensus(): each peak "votes" for its top group (cell type or lineage),
-#      weighted by (max group specificity) * (peak accessibility weight from L2 norm)
-#    - Locus score = fraction of total weighted votes captured by the winning group (plurality)
-#    - Captures whether peaks CONVERGE ON THE SAME DOMINANT cell type/lineage
-#    - Range: 1/n_groups (uniform) to 1.0 (all peaks point to one group)
-#    - Metric: weighted plurality fraction
-#
+
 # Both methods use bin-matched permutation testing to generate null distributions:
-#    - Peaks are classified into joint bins (TSS distance x peak density)
-#    - Null loci are sampled from non-GWAS loci with matching bin composition
-#    - Z-scores and empirical p-values quantify significance
+
 #
 # Wrapper functions (addLocusCoherence, addLocusCoherence_consensus) handle
 # peak annotation, locus assignment, and result categorisation.
@@ -36,27 +22,26 @@
 # RANK CONCORDANCE
 # ============================================================
 # Measures whether GWAS-overlapping peaks within a locus show
-# consistent cell-type specificity RANKINGS. High concordance
-# means peaks rank cell types similarly (e.g. all peaks rank
-# the same cell as #1, #2, etc), even if no single cell dominates.
+# consistent cell-type specificity RANKINGS. 
 #
 # Metric: mean pairwise Spearman rho across peaks in the locus
 # Null: bin-matched random peaks from the genome-wide matrix
 # ============================================================
 compute_locus_rank_concordance_vec <- function(
-  gwas_mat,            # L2-normalised specificity matrix for GWAS-overlapping peaks (peaks x cell types)
-  full_mat,            # L2-normalised specificity for ALL peaks genome-wide (used for permutation null)
-  peak_to_locus,       # named vector: peak name -> locus ID (for GWAS peaks)
-  joint_bin_full,      # named vector: peak name -> joint bin label (TSS distance x density, genome-wide)
-  cell_lineage,        # named vector: cell type name -> lineage group label
-  n_perm = 1000) {     # number of permutations for null distribution
+  gwas_mat,            # L2 GWAS-overlapping peaks 
+  full_mat,            # genome-wide (used for permutation null)
+  peak_to_locus,       # locus ID (for GWAS peaks)
+  joint_bin_full,      # joint bin label (TSS distance x density, genome-wide)
+  cell_lineage,        # lineage group label
+  n_perm = 1000) {     # number of permutations for null 
 
   # Rank each peak's specificity values across cell types (row-wise ranking)
-  # This converts raw L2 scores to ranks for non-parametric correlation
+  # Not the same as global enrichment ranking; this is per-peak to capture relative specificity patterns
   rank_gwas <- t(apply(gwas_mat, 1, rank))
   rank_full <- t(apply(full_mat, 1, rank))
 
-  # Map GWAS peaks to their locus; drop any without a valid locus assignment
+  # this can take advantage of the peak-level summary with the dominancy 
+  # Map GWAS peaks to their locus (OpenTargets uses the lead SNP)
   valid_locus <- peak_to_locus[rownames(gwas_mat)]
   keep <- !is.na(valid_locus) & nzchar(valid_locus)
   if (!any(keep)) return(data.frame())
@@ -65,14 +50,14 @@ compute_locus_rank_concordance_vec <- function(
   gwas_peaks <- rownames(gwas_mat)[keep]
   locus_split <- split(gwas_peaks, valid_locus[keep])
 
-  # Pre-split genome-wide peaks by joint bin for efficient permutation sampling
+  # genome-wide peaks by joint bin for efficient permutation sampling
   full_bins <- split(names(joint_bin_full), joint_bin_full)
   
   results <- lapply(names(locus_split), function(locus) {
     peaks <- locus_split[[locus]]
     k <- length(peaks)
 
-    # Single-peak loci cannot have concordance (need >=2 for pairwise comparison)
+    # Single-peak loci NAs
     if (k < 2) {
       return(data.frame(
         locus = locus,
