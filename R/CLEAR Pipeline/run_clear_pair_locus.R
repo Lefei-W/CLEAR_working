@@ -1340,10 +1340,13 @@ plot_specificity_bar <- function(specificity_summary_l2, se_name, trait_name, pl
   invisible(p_spec_l2)
 }
 
-addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir, cell_lineage = NULL) {
+addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
+                           cell_lineage = NULL, se_gwas = NULL) {
   if (!nrow(gwas_mat)) return(data.frame())
   
   specificity_summary_l2_detailed <- compute_specificity_summary(gwas_mat)
+
+  # --- Cell-type level: high / mid / low counts and names ---
   specificity_basic <- data.frame(
     peak = rownames(gwas_mat),
     n_high = rowSums(gwas_mat > high_thresh),
@@ -1354,10 +1357,16 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
   high_cells <- apply(gwas_mat, 1, function(x) names(x)[x > high_thresh])
   specificity_basic$high_cells <- sapply(high_cells, paste, collapse = ", ")
   specificity_basic$multiple_high <- lengths(high_cells) > 1
+
+  mid_cells <- apply(gwas_mat, 1, function(x) {
+    names(x)[x > mid_thresh & x <= high_thresh]
+  })
+  specificity_basic$mid_cells <- sapply(mid_cells, paste, collapse = ", ")
   
   specificity_summary_l2 <- specificity_summary_l2_detailed %>%
     left_join(specificity_basic, by = "peak")
 
+  # --- Lineage-level dominance (ratio-based) ---
   if (!is.null(cell_lineage)) {
     dom_lineage <- compute_dominance_lineage(gwas_mat, cell_lineage, ratio_thresh = DEFAULT_RATIO_THRESH) %>%
       dplyr::select(
@@ -1368,10 +1377,52 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
       )
     specificity_summary_l2 <- specificity_summary_l2 %>%
       left_join(dom_lineage, by = "peak")
+
+    # --- Lineage-level high / mid counts and names ---
+    lineage_vec <- cell_lineage[colnames(gwas_mat)]
+    lineage_levels <- unique(as.character(lineage_vec))
+    mat_sq <- gwas_mat^2
+    lineage_mat <- sapply(lineage_levels, function(lg) {
+      rowSums(mat_sq[, lineage_vec == lg, drop = FALSE])
+    })
+    lineage_mat <- as.matrix(lineage_mat)
+    rownames(lineage_mat) <- rownames(gwas_mat)
+
+    lin_high_thresh <- high_thresh^2
+    lin_mid_thresh  <- mid_thresh^2
+
+    specificity_summary_l2$n_high_lineage <- rowSums(lineage_mat > lin_high_thresh)
+    specificity_summary_l2$n_mid_lineage  <- rowSums(lineage_mat > lin_mid_thresh & lineage_mat <= lin_high_thresh)
+    specificity_summary_l2$n_low_lineage  <- rowSums(lineage_mat <= lin_mid_thresh)
+
+    high_lin <- apply(lineage_mat, 1, function(x) names(x)[x > lin_high_thresh])
+    mid_lin  <- apply(lineage_mat, 1, function(x) names(x)[x > lin_mid_thresh & x <= lin_high_thresh])
+    specificity_summary_l2$high_lineages <- sapply(high_lin, paste, collapse = ", ")
+    specificity_summary_l2$mid_lineages  <- sapply(mid_lin,  paste, collapse = ", ")
+
+    specificity_summary_l2$top_lineage <- colnames(lineage_mat)[max.col(lineage_mat, ties.method = "first")]
   } else {
     specificity_summary_l2$dominant_lineage <- NA_character_
     specificity_summary_l2$dominant_lineage_ratio <- NA_real_
     specificity_summary_l2$dominant_lineage_is_dominant <- NA
+    specificity_summary_l2$n_high_lineage <- NA_integer_
+    specificity_summary_l2$n_mid_lineage  <- NA_integer_
+    specificity_summary_l2$n_low_lineage  <- NA_integer_
+    specificity_summary_l2$high_lineages  <- NA_character_
+    specificity_summary_l2$mid_lineages   <- NA_character_
+    specificity_summary_l2$top_lineage    <- NA_character_
+  }
+
+  # --- Top cell type (argmax L2, always populated) ---
+  specificity_summary_l2$top_cell <- colnames(gwas_mat)[max.col(gwas_mat, ties.method = "first")]
+
+  # --- Weight: mean raw accessibility across cell types ---
+  if (!is.null(se_gwas) && "raw" %in% assayNames(se_gwas)) {
+    raw_gwas <- assay(se_gwas, "raw")
+    if (inherits(raw_gwas, "Matrix")) raw_gwas <- as.matrix(raw_gwas)
+    specificity_summary_l2$weight <- rowMeans(raw_gwas[rownames(gwas_mat), , drop = FALSE])
+  } else {
+    specificity_summary_l2$weight <- NA_real_
   }
 
   specificity_summary_l2 <- add_gwas_peak_annotation(specificity_summary_l2, snps)
@@ -1384,10 +1435,11 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
   specificity_summary_l2 <- specificity_summary_l2 %>%
     select(
       locus, peak, gwas_snps, gwas_locus,
-      maximum_cell, maximum_score, dominant_ratio, is_dominant,
-      dominant_lineage, dominant_lineage_ratio, dominant_lineage_is_dominant,
-      n_high, n_mid, n_low, high_cells, multiple_high,
-      k_cells, top_k_cells, coherence
+      top_cell, maximum_cell, maximum_score, dominant_ratio, is_dominant,
+      n_high, n_mid, n_low, high_cells, mid_cells, multiple_high,
+      top_lineage, dominant_lineage, dominant_lineage_ratio, dominant_lineage_is_dominant,
+      n_high_lineage, n_mid_lineage, n_low_lineage, high_lineages, mid_lineages,
+      weight, k_cells, top_k_cells, coherence
     )
   
   write.table(specificity_summary_l2, file.path(results_dir, "specificity_summary_l2.txt"), sep = "\t", quote = FALSE, row.names = FALSE)
@@ -1635,7 +1687,7 @@ if (file.exists(processed_se_path)) {
   message("  Saved processed SE cache: ", processed_se_path)
 }
 
-required_assays <- c("raw", "raw_l2", "raw_l2_rank", "cor_raw", "cor_raw_l2")
+required_assays <- c("raw", "raw_l2", "raw_l2_rank")
 if (!all(required_assays %in% assayNames(se))) {
   message("  Cached SE missing expected assays; reloading raw SE and refreshing cache")
   se <- readRDS(se_path)

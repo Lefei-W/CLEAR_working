@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # ============================================================
 # run_clear_pair_locus.R  (master runner)
-# One snATAC SE x GWAS trait pair — sources Functions/ then
+# One snATAC SE x GWAS trait pair  sources Functions/ then
 # runs the 9-step CLEAR pipeline.
 # ============================================================
 
@@ -53,7 +53,7 @@ if (length(args) >= 4) {
 } else {
   # --- Interactive / RStudio mode: edit these ---
   se_name       <- "breast_full_330k"
-  se_path       <- "../../../CLEAR_data/snATAC_ArchR_PeakMatrix/breast_330017peak.rds"
+  se_path       <- "/working/lab_jonathb/lefeiW/projects/CLEAR_data/snATAC_ArchR_PeakMatrix/breast_330017peak.rds"
   trait_name    <- "BCAC_FM"
   trait_path    <- "/working/lab_jonathb/lefeiW/projects/ATAC_BCAC/data/BCAC_FM_GR.rds"
   gtf_path      <- "/working/lab_jonathb/lefeiW/projects/CLEAR_data/gencode.v46.chr_patch_hapl_scaff.basic.annotation.gtf.gz"
@@ -69,7 +69,7 @@ if (length(args) >= 4) {
 # can inspect se, gwas_mat, locus_results, etc. afterwards.
 # ===========================================================
 run_clear <- function() {
-
+  
   message("\n========================================")
   message("CLEAR analysis (locus): ", se_name, " x ", trait_name)
   message("  SE path:    ", se_path)
@@ -79,24 +79,24 @@ run_clear <- function() {
   message("  k_lineage:  ", k_lineage)
   message("  processed_dir: ", processed_dir)
   message("========================================\n")
-
+  
   # Output directories
   results_dir    <<- "results"
   plots_dir      <<- "plots"
   data_dir       <<- "data"
-
+  
   for (d in c(results_dir, plots_dir, data_dir)) {
     dir.create(d, recursive = TRUE, showWarnings = FALSE)
   }
   dir.create(processed_dir, recursive = TRUE, showWarnings = FALSE)
-
+  
   # --- Step 1: Load trait and processed/raw SE ---
   processed_se_path <- se_path
-
+  
   message("\n--- Step 1: Load trait and processed/raw SE ---")
   snps <<- readRDS(trait_path)
   message("  SNPs: ", length(snps))
-
+  
   if (file.exists(processed_se_path)) {
     message("  Found processed SE cache: ", processed_se_path)
     se <<- readRDS(processed_se_path)
@@ -108,8 +108,12 @@ run_clear <- function() {
     saveRDS(se, processed_se_path)
     message("  Saved processed SE cache: ", processed_se_path)
   }
-
-  required_assays <- c("raw", "raw_l2", "raw_l2_rank", "cor_raw", "cor_raw_l2")
+  
+  # Core assays used by the pipeline: raw, raw_l2, raw_l2_rank
+  # cor_raw and cor_raw_l2 are optional (corpcor-weighted variants)  computed
+  # by compute_metrics_se_no_cov() and available for exploratory QC plots,
+  # but not used in any downstream analysis (specificity, dominance, coherence).
+  required_assays <- c("raw", "raw_l2", "raw_l2_rank")
   if (!all(required_assays %in% assayNames(se))) {
     message("  Cached SE missing expected assays; reloading raw SE and refreshing cache")
     se <<- readRDS(se_path)
@@ -117,17 +121,17 @@ run_clear <- function() {
     se <<- compute_metrics_se_no_cov(se)
     saveRDS(se, processed_se_path)
   }
-
+  
   message("  SE:   ", nrow(se), " peaks x ", ncol(se), " cell types")
-
+  
   message("  Building lineage map from genome-wide raw_l2 and plotting dendrogram")
   lineage_obj <<- build_lineage_map(assay(se, "raw_l2"), k_lineage = k_lineage)
   plot_lineage_dendrogram(lineage_obj, se_name, plots_dir)
-
+  
   # --- Step 2: Extract L2 matrix ---
   message("\n--- Step 2: Extract L2 matrix ---")
   mat_l2 <<- assay(se, "raw_l2")
-
+  
   # --- Step 3: GWAS overlap ---
   message("\n--- Step 3: GWAS overlap ---")
   overlap <<- compute_gwas_overlap(se, snps)
@@ -139,26 +143,42 @@ run_clear <- function() {
     gwas_se_name <- paste0(se_name, "_", trait_name, "_", nrow(gwas_mat), "peaks_", n_sig_overlap, "signals.rds")
     saveRDS(se_gwas, file.path(results_dir, gwas_se_name))
   }
-
+  
   # --- Step 4: Correlation heatmaps and densities ---
   message("\n--- Step 4: Correlation heatmaps and densities ---")
   plot_assay_cor_heatmaps(se, se_name, plots_dir)
   plot_assay_densities(se, se_name, plots_dir, lineage_palette = lineage_obj$palette)
+  plot_lineage_cor_heatmap(mat_l2, lineage_obj$cell_lineage, se_name, plots_dir,
+                           lineage_colours = lineage_obj$lineage_colours)
+  plot_lineage_densities(mat_l2, lineage_obj$cell_lineage, se_name, plots_dir,
+                         lineage_colours = lineage_obj$lineage_colours)
   if (nrow(gwas_mat) > 1) {
     plot_assay_cor_heatmaps(se_gwas, paste0(se_name, "_", trait_name, "_GWAS"), plots_dir)
     plot_assay_densities(se_gwas, paste0(se_name, "_", trait_name, "_GWAS"), plots_dir, lineage_palette = lineage_obj$palette)
+    plot_lineage_cor_heatmap(gwas_mat, lineage_obj$cell_lineage,
+                             paste0(se_name, "_", trait_name, "_GWAS"), plots_dir,
+                             lineage_colours = lineage_obj$lineage_colours)
+    plot_lineage_densities(gwas_mat, lineage_obj$cell_lineage,
+                           paste0(se_name, "_", trait_name, "_GWAS"), plots_dir,
+                           lineage_colours = lineage_obj$lineage_colours)
   }
-
+  
   # --- Step 5: Input summary ---
   message("\n--- Step 5: Input summary ---")
   summarize_inputs(se_name, trait_name, se_path, trait_path, se, snps, overlap, results_dir)
-
+  
   # --- Step 6: L2 specificity summary ---
   message("\n--- Step 6: L2 specificity summary ---")
-  high_thresh <- 1 / sqrt(3)
+  high_thresh <- 1 / sqrt(2) # this is that one cell type or lineage takes more than 50%
   mid_thresh <- 1 / sqrt(ncol(mat_l2))
-  specificity_summary_l2 <<- addSpecificity(gwas_mat, snps, high_thresh, mid_thresh, results_dir, cell_lineage = lineage_obj$cell_lineage)
+  specificity_summary_l2 <<- addSpecificity(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
+                                            cell_lineage = lineage_obj$cell_lineage, se_gwas = se_gwas,
+                                            gtf_path = gtf_path)
   plot_specificity_bar(specificity_summary_l2, se_name, trait_name, plots_dir)
+  plot_specificity_density(mat_l2, gwas_mat, se_name, trait_name, plots_dir)
+  plot_specificity_weighted(specificity_summary_l2, se_name, trait_name, plots_dir,
+                            lineage_palette = lineage_obj$palette)
+  plot_weight_vs_tss(specificity_summary_l2, se_name, trait_name, plots_dir)
   plot_celltype_stackbars(
     se_gwas,
     value_metric = "raw_l2",
@@ -173,19 +193,27 @@ run_clear <- function() {
     outfile = file.path(plots_dir, paste0(se_name, "_", trait_name, "_stackbars_l2_cum80.pdf")),
     lineage_palette = lineage_obj$palette
   )
-
+  plot_lineage_stackbars(
+    se_gwas,
+    value_metric = "raw_l2",
+    outfile = file.path(plots_dir, paste0(se_name, "_", trait_name, "_lineage_stackbars.pdf")),
+    cell_lineage = lineage_obj$cell_lineage,
+    lineage_colours = lineage_obj$lineage_colours
+  )
+  
   # --- Step 7: Dominance plots ---
   message("\n--- Step 7: Dominance plots ---")
   plot_dominance(mat_l2, gwas_mat, se_name, trait_name, plots_dir, lineage_palette = lineage_obj$palette)
-  plot_domiance_lineage(mat_l2, gwas_mat, lineage_obj$cell_lineage, se_name, trait_name, plots_dir)
-
+  plot_domiance_lineage(mat_l2, gwas_mat, lineage_obj$cell_lineage, se_name, trait_name, plots_dir,
+                        lineage_colours = lineage_obj$lineage_colours)
+  
   # --- Step 8: Locus-level permutation concordance ---
   message("\n--- Step 8: Locus-level permutation concordance ---")
   locus_results <<- addLocusCoherence(se, se_gwas, mat_l2, gwas_mat, gtf_path, lineage_obj, n_perm, results_dir)
   if (nrow(locus_results)) {
     plot_coherence(locus_results, se_name, trait_name, plots_dir)
   }
-
+  
   # --- Step 8b: Locus-level consensus concordance ---
   message("\n--- Step 8b: Locus-level consensus concordance ---")
   locus_results_consensus <<- addLocusCoherence_consensus(
@@ -193,19 +221,21 @@ run_clear <- function() {
     specificity_summary_l2 = specificity_summary_l2
   )
   if (nrow(locus_results_consensus)) {
-    plot_coherence_consensus(locus_results_consensus, se_name, trait_name, plots_dir)
+    plot_coherence_consensus(locus_results_consensus, se_name, trait_name, plots_dir,
+                              lineage_colours = lineage_obj$lineage_colours)
   }
-
+  
   # --- Step 9: Global rank-based enrichment (L2) ---
   message("\n--- Step 9: Global rank-based enrichment (L2) ---")
-  addGlobalEnrichment(se, snps, mat_l2, results_dir, plots_dir, se_name, trait_name)
-
+  addGlobalEnrichment(se, snps, mat_l2, results_dir, plots_dir, se_name, trait_name,
+                      lineage_palette = lineage_obj$palette)
+  
   message("\n========================================")
   message("CLEAR analysis complete: ", se_name, " x ", trait_name)
   message("Results: ", normalizePath(results_dir))
   message("Plots:   ", normalizePath(plots_dir))
   message("========================================\n")
-
+  
   invisible(NULL)
 }
 
@@ -215,3 +245,8 @@ if (length(commandArgs(TRUE)) >= 4) {
 } else {
   message("Ready. Edit the USER INPUTS in the 'Interactive' block, then call run_clear()")
 }
+
+
+
+
+

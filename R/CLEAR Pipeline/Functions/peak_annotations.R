@@ -73,6 +73,9 @@ prepare_peak_annotations <- function(se, gtf, gwas_mat, specificity_summary_GWAS
   if (!is.null(specificity_summary_GWAS) && "gwas_locus" %in% names(specificity_summary_GWAS)) {
     peak_to_locus_gwas <- specificity_summary_GWAS$gwas_locus
     names(peak_to_locus_gwas) <- specificity_summary_GWAS$peak
+  } else if (!is.null(specificity_summary_GWAS) && "locus" %in% names(specificity_summary_GWAS)) {
+    peak_to_locus_gwas <- specificity_summary_GWAS$locus
+    names(peak_to_locus_gwas) <- specificity_summary_GWAS$peak
   } else {
     peak_to_locus_gwas <- setNames(as.character(rowData(se[rownames(gwas_mat),])$signal), rownames(gwas_mat))
   }

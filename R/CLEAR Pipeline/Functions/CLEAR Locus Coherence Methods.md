@@ -13,6 +13,58 @@ Here are two locus-level metrics computed:
 1. Rank concordance 19-03 
 2. Consensus concordance 27-03
 
+### Peak-level specificity annotation (pre-computed per GWAS peak)
+
+Before locus-level analysis, each GWAS peak is annotated with specificity metrics via `addSpecificity()`. These columns appear in `specificity_summary_l2.txt`:
+
+#### Thresholds
+
+- **high\_thresh** = $1/\sqrt{2} \approx 0.707$ — a single cell type captures > 50% of the L2-normalised signal (since $s_c^2 > 0.5$).
+- **mid\_thresh** = $1/\sqrt{C}$ — the "uniform null" level; if all $C$ cell types contributed equally, each would have L2 = $1/\sqrt{C}$.
+
+#### Columns
+
+| Column | Description |
+|--------|-------------|
+| `top_cell` | Cell type with the highest L2 (argmax, always populated) |
+| `maximum_cell` | Same as top\_cell (from `compute_specificity_summary`) |
+| `maximum_score` | The max L2 value of the top cell type |
+| `dominant_ratio` | top1 / second highest L2 |
+| `is_dominant` | TRUE if `dominant_ratio` $\geq 2$ (cell-type level) |
+| `n_high` | Count of cell types with L2 > high\_thresh |
+| `n_mid` | Count of cell types with mid\_thresh < L2 $\leq$ high\_thresh |
+| `n_low` | Count of cell types with L2 $\leq$ mid\_thresh |
+| `high_cells` | Comma-separated names of high cell types |
+| `mid_cells` | Comma-separated names of mid cell types |
+| `multiple_high` | TRUE if more than one cell type exceeds high\_thresh |
+| `top_lineage` | Lineage group with the highest summed $L2^2$ (argmax, always populated) |
+| `dominant_lineage` | Lineage that passes the ratio test |
+| `dominant_lineage_ratio` | top1 / second lineage $\sum L2^2$ ratio |
+| `dominant_lineage_is_dominant` | TRUE if lineage ratio $\geq 2$ |
+| `n_high_lineage` | Count of lineage groups with $\sum L2^2$ > high\_thresh$^2$ |
+| `n_mid_lineage` | Count of lineage groups with mid\_thresh$^2$ < $\sum L2^2$ $\leq$ high\_thresh$^2$ |
+| `n_low_lineage` | Count with $\sum L2^2$ $\leq$ mid\_thresh$^2$ |
+| `high_lineages` | Comma-separated names of high lineage groups |
+| `mid_lineages` | Comma-separated names of mid lineage groups |
+| `weight` | Mean raw accessibility across cell types (`rowMeans(raw)`) |
+| `k_cells` | Number of cell types needed to capture 80% of $\sum L2^2$ |
+| `top_k_cells` | Comma-separated names of those k cell types |
+| `coherence` | Mean pairwise Pearson correlation among the top k cell types |
+
+#### Why more peaks are "dominant" at lineage level than cell-type level
+
+The cell-type ratio test ($\text{top1}/\text{second} \geq 2$) often fails when closely related cell types (e.g., two excitatory neuron subtypes) have near-equal L2 scores. Both rank top-1 and top-2, so the ratio approaches 1. At lineage level, these related cell types are summed into one group (via $\sum L2^2$), collapsing the tie into a single dominant lineage signal. This is expected and desirable — specificity is often at the lineage level, not the fine cell-type level.
+
+#### Weight (accessibility) and its role
+
+L2 normalisation removes peak-level magnitude — a peak accessed 1000 times and a peak accessed 10 times get the same unit-norm vector. But biologically, highly accessible peaks in cell-type-specific contexts are more likely to be functional regulatory elements. The `weight` column (= `rowMeans(raw)`) recovers this accessibility dimension.
+
+**How weight is incorporated:**
+- In the **consensus concordance** method, weight is already used: each peak's vote is scaled by $w_i = G_{ig_i^*} \times \bar{a}_i$ (specificity × accessibility).
+- In the **rank concordance** method, all peaks are currently treated equally. The `weight` column enables downstream filtering or a future weighted variant.
+- **Plot: Specificity vs Accessibility** (`_l2_specificity_vs_weight.pdf`) — scatter of max L2 vs weight, showing which peaks are both specific and accessible (top-right = biologically strongest candidates).
+- **Plot: Max L2 density** (`_l2_specificity_density.pdf`) — density of max L2 for GWAS vs genome-wide peaks, with threshold lines.
+
 Ideas:
 We want to focus more on those peaks and cell types with high or mid dominant in the peak-level analysis. Often looking into the L2 specificity stacked bars, some GWAS peaks might not be that interesting and could be just by chance rather than functional regulatory. So we add: 
 1. cell type specificity (peak-level summary) 2. overall peak accessibility 3. promoter enhancer (not just by TSS bins controlled in the permutation, but mean peak accessibility and sd), hypothesis: promoter peaks more accessible, enhancer peaks more variable

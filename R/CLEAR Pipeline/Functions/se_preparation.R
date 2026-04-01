@@ -59,6 +59,24 @@ compute_l2_weights <- function(se) {
 
 add_rank_desc <- function(M) apply(M, 2, function(x) rank(-x, ties.method = "average"))
 
+# ------------------------------------------------------------------
+# compute_metrics_se_no_cov
+#
+# Computes assays stored in the SE:
+#   raw        — original counts (renamed for clarity)
+#   raw_l2     — L2-normalised (unit-norm rows, sum of s^2 = 1)
+#   raw_l2_rank — column-wise ranks of raw_l2 (descending)
+#   cor_raw     — corpcor shrinkage-weighted raw counts  [OPTIONAL]
+#   cor_raw_l2  — corpcor shrinkage-weighted L2 scores   [OPTIONAL]
+#
+# The cor_raw / cor_raw_l2 assays apply a Ledoit-Wolf shrinkage
+# inverse-correlation weighting (solve(cor) %*% t(mat)) to decorrelate
+# highly correlated cell types. They were explored as an alternative
+# to plain L2 but are NOT used in the current pipeline (specificity,
+# dominance, concordance, consensus all run on raw_l2). They are kept
+# here so the option is available and can be justified as an explored
+# alternative in the thesis.
+# ------------------------------------------------------------------
 compute_metrics_se_no_cov <- function(se, assay_name = NULL, keep_top_prop = NULL) {
   if (is.null(assay_name)) assay_name <- assayNames(se)[1]
   

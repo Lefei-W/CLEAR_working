@@ -496,7 +496,8 @@ addLocusCoherence_consensus <- function(se, se_gwas, mat_l2, gwas_mat, gtf_path,
 # This is a GLOBAL (trait-level) metric, not locus-level.
 # It asks: "across all GWAS loci combined, is this cell type enriched?"
 # ============================================================
-addGlobalEnrichment <- function(se, snps, mat_l2, results_dir, plots_dir, se_name, trait_name) {
+addGlobalEnrichment <- function(se, snps, mat_l2, results_dir, plots_dir, se_name, trait_name,
+                                lineage_palette = NULL) {
   # Rank each cell type's L2 specificity column across all peaks (column-wise ranking)
   nmat_r <- apply(mat_l2, 2, function(x) rank(x, ties.method = "min"))
   nse_rank <- SummarizedExperiment(nmat_r, rowRanges = rowRanges(se))
@@ -535,31 +536,68 @@ addGlobalEnrichment <- function(se, snps, mat_l2, results_dir, plots_dir, se_nam
 
   write.table(global_enrichment, file.path(results_dir, "global_enrichment.txt"), sep = "\t", quote = FALSE, row.names = FALSE)
   
-  p_enrich <- ggplot(global_enrichment, aes(x = reorder(celltype, z), y = z, fill = positive)) +
-    geom_bar(stat = "identity") + coord_flip() + theme_bw() +
-    geom_text(aes(label = fdr_stars), hjust = ifelse(global_enrichment$z >= 0, -0.3, 1.3), size = 4) +
-    scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "gray")) +
-    scale_y_continuous(expand = expansion(mult = c(0.05, 0.10))) +
-    labs(
-      x = "Cell type", y = "Z-score (rank enrichment)",
-      title = paste0(se_name, " x ", trait_name, " - Global GWAS Enrichment"),
-      subtitle = "* FDR<0.05  ** FDR<0.01  *** FDR<0.001",
-      fill = "FDR < 0.05"
-    )
+  # Use lineage palette for bar colours when available
+  ct_levels <- global_enrichment$celltype
+  use_palette <- !is.null(lineage_palette) && all(ct_levels %in% names(lineage_palette))
+
+  if (use_palette) {
+    ge_ord <- global_enrichment[order(global_enrichment$z), ]
+    ge_ord$celltype <- factor(ge_ord$celltype, levels = ge_ord$celltype)
+    p_enrich <- ggplot(ge_ord, aes(x = celltype, y = z, fill = celltype)) +
+      geom_bar(stat = "identity") + coord_flip() + theme_bw() +
+      geom_text(aes(label = fdr_stars), hjust = ifelse(ge_ord$z >= 0, -0.3, 1.3), size = 4) +
+      scale_fill_manual(values = lineage_palette) +
+      scale_y_continuous(expand = expansion(mult = c(0.05, 0.10))) +
+      labs(
+        x = "Cell type", y = "Z-score (rank enrichment)",
+        title = paste0(se_name, " x ", trait_name, " - Global GWAS Enrichment"),
+        subtitle = "* FDR<0.05  ** FDR<0.01  *** FDR<0.001",
+        fill = "Cell type"
+      )
+  } else {
+    p_enrich <- ggplot(global_enrichment, aes(x = reorder(celltype, z), y = z, fill = positive)) +
+      geom_bar(stat = "identity") + coord_flip() + theme_bw() +
+      geom_text(aes(label = fdr_stars), hjust = ifelse(global_enrichment$z >= 0, -0.3, 1.3), size = 4) +
+      scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "gray")) +
+      scale_y_continuous(expand = expansion(mult = c(0.05, 0.10))) +
+      labs(
+        x = "Cell type", y = "Z-score (rank enrichment)",
+        title = paste0(se_name, " x ", trait_name, " - Global GWAS Enrichment"),
+        subtitle = "* FDR<0.05  ** FDR<0.01  *** FDR<0.001",
+        fill = "FDR < 0.05"
+      )
+  }
   ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_global_enrichment.pdf")), p_enrich, width = 8, height = 6)
   
-  p_fdr <- ggplot(global_enrichment, aes(x = reorder(celltype, -log10(fdr)), y = -log10(fdr), fill = positive)) +
-    geom_bar(stat = "identity") + coord_flip() + theme_bw() +
-    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue", linewidth = 0.6) +
-    geom_text(aes(label = fdr_stars), hjust = -0.3, size = 4) +
-    scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "gray")) +
-    scale_y_continuous(expand = expansion(mult = c(0, 0.10))) +
-    labs(
-      x = "Cell type", y = "-log10(FDR)",
-      title = paste0(se_name, " x ", trait_name, " - Global Enrichment (FDR)"),
-      subtitle = "* FDR<0.05  ** FDR<0.01  *** FDR<0.001",
-      fill = "FDR < 0.05"
-    )
+  if (use_palette) {
+    ge_ord2 <- global_enrichment[order(-log10(global_enrichment$fdr)), ]
+    ge_ord2$celltype <- factor(ge_ord2$celltype, levels = ge_ord2$celltype)
+    p_fdr <- ggplot(ge_ord2, aes(x = celltype, y = -log10(fdr), fill = celltype)) +
+      geom_bar(stat = "identity") + coord_flip() + theme_bw() +
+      geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue", linewidth = 0.6) +
+      geom_text(aes(label = fdr_stars), hjust = -0.3, size = 4) +
+      scale_fill_manual(values = lineage_palette) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.10))) +
+      labs(
+        x = "Cell type", y = "-log10(FDR)",
+        title = paste0(se_name, " x ", trait_name, " - Global Enrichment (FDR)"),
+        subtitle = "* FDR<0.05  ** FDR<0.01  *** FDR<0.001",
+        fill = "Cell type"
+      )
+  } else {
+    p_fdr <- ggplot(global_enrichment, aes(x = reorder(celltype, -log10(fdr)), y = -log10(fdr), fill = positive)) +
+      geom_bar(stat = "identity") + coord_flip() + theme_bw() +
+      geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue", linewidth = 0.6) +
+      geom_text(aes(label = fdr_stars), hjust = -0.3, size = 4) +
+      scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "gray")) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.10))) +
+      labs(
+        x = "Cell type", y = "-log10(FDR)",
+        title = paste0(se_name, " x ", trait_name, " - Global Enrichment (FDR)"),
+        subtitle = "* FDR<0.05  ** FDR<0.01  *** FDR<0.001",
+        fill = "FDR < 0.05"
+      )
+  }
   ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_global_enrichment_fdr.pdf")), p_fdr, width = 8, height = 6)
   
   global_enrichment

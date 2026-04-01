@@ -13,7 +13,10 @@ pval_to_stars <- function(p) {
   )
 }
 
-PLOT_ASSAYS <- c("raw", "raw_l2", "cor_raw", "cor_raw_l2")
+# cor_raw and cor_raw_l2 are kept in se_preparation as optional assays
+# (corpcor-weighted versions), but not used in the current pipeline.
+# Only raw and raw_l2 are plotted for QC.
+PLOT_ASSAYS <- c("raw", "raw_l2")
 
 plot_assay_cor_heatmaps <- function(se, tissue, plot_dir = "plots") {
   out <- file.path(plot_dir, tissue)
@@ -25,12 +28,16 @@ plot_assay_cor_heatmaps <- function(se, tissue, plot_dir = "plots") {
     if (inherits(mat, "Matrix")) mat <- as.matrix(mat)
     if (ncol(mat) < 2) next
     cor_mat <- cor(mat, use = "pairwise.complete.obs")
+    rng <- range(cor_mat, na.rm = TRUE)
+    mid <- (rng[1] + rng[2]) / 2
+    col_fun <- circlize::colorRamp2(c(rng[1], mid, rng[2]), c("blue", "white", "red"))
     fname <- file.path(out, paste0(tissue, "_", a, "_cor_heatmap.pdf"))
     pdf(fname, width = 8, height = 7)
     ht <- ComplexHeatmap::Heatmap(
       cor_mat,
       name = "Correlation",
-      column_title = paste0(tissue, " - ", a, " correlation"),
+      column_title = paste0(tissue, " - ", a, " correlation",
+                            "  [range: ", round(rng[1], 2), " to ", round(rng[2], 2), "]"),
       clustering_method_rows = "ward.D2",
       clustering_method_columns = "ward.D2",
       clustering_distance_rows = "euclidean",
@@ -39,7 +46,7 @@ plot_assay_cor_heatmaps <- function(se, tissue, plot_dir = "plots") {
       show_column_dend = TRUE,
       row_names_gp = grid::gpar(fontsize = 7),
       column_names_gp = grid::gpar(fontsize = 7),
-      col = circlize::colorRamp2(c(-1, 0, 1), c("blue", "white", "red"))
+      col = col_fun
     )
     ComplexHeatmap::draw(ht)
     dev.off()
@@ -265,6 +272,143 @@ plot_celltype_stackbars <- function(
   invisible(TRUE)
 }
 
+# ---------------------------------------------------------------
+# Plot: Lineage-level stacked bar chart
+# Filters peaks where top <=max_k lineages explain >=cumvar_threshold
+# of L2^2 variance.  Bars ordered high-to-low within each peak.
+# ---------------------------------------------------------------
+plot_lineage_stackbars <- function(
+    se_overlap,
+    value_metric = "raw_l2",
+    cumvar_threshold = 0.8,
+    max_k = 2,
+    outfile,
+    cell_lineage,
+    lineage_colours = NULL,
+    max_peaks = 200) {
+  stopifnot(!missing(outfile))
+
+  if (!value_metric %in% assayNames(se_overlap)) {
+    warning("Assay '", value_metric, "' not found; skipping lineage stackbar.")
+    return(invisible(FALSE))
+  }
+
+  val_mat <- SummarizedExperiment::assay(se_overlap, value_metric)
+  if (inherits(val_mat, "Matrix")) val_mat <- as.matrix(val_mat)
+  storage.mode(val_mat) <- "double"
+
+  lineage_mat <- compute_lineage_matrix(val_mat, cell_lineage)
+  if (ncol(lineage_mat) < 2) {
+    warning("Fewer than 2 lineages; skipping lineage stackbar.")
+    return(invisible(FALSE))
+  }
+
+  # Filter: top <=max_k lineages must explain >=cumvar_threshold
+  peak_info <- lapply(seq_len(nrow(lineage_mat)), function(i) {
+    row_vals <- lineage_mat[i, ]
+    ord <- order(row_vals, decreasing = TRUE)
+    cum_vals <- cumsum(row_vals[ord])
+    k <- which(cum_vals >= cumvar_threshold)[1]
+    if (is.na(k) || k > max_k) return(NULL)
+    list(idx = i, k = k, cum_var = cum_vals[k])
+  })
+  peak_info <- Filter(Negate(is.null), peak_info)
+
+  if (!length(peak_info)) {
+    threshold_pct <- cumvar_threshold * 100
+    warning("No peaks where top <=", max_k, " lineages explain >=", threshold_pct, "% L2^2")
+    grDevices::pdf(outfile, width = 10, height = 6)
+    plot.new(); text(0.5, 0.5, "No peaks meeting criteria")
+    dev.off()
+    return(invisible(FALSE))
+  }
+
+  sel   <- sapply(peak_info, `[[`, "idx")
+  sel_k <- sapply(peak_info, `[[`, "k")
+
+  if (length(sel) > max_peaks) {
+    ord <- order(sel_k, -apply(lineage_mat[sel, , drop = FALSE], 1, max))
+    keep <- ord[seq_len(max_peaks)]
+    sel <- sel[keep]; sel_k <- sel_k[keep]; peak_info <- peak_info[keep]
+  }
+
+  # Peak labels
+  rd <- as.data.frame(rowData(se_overlap))
+  peakid <- if ("peakid" %in% names(rd)) rd$peakid else rownames(se_overlap)
+  ccv_label <- if ("CCVs" %in% names(rd)) rd$CCVs else ""
+  sig_label <- if ("signal" %in% names(rd)) rd$signal else ""
+  base_label <- ifelse(nzchar(ccv_label), ccv_label, peakid)
+  labels <- ifelse(nzchar(sig_label), paste0(base_label, " (", sig_label, ")"), base_label)
+
+  dom_lin <- apply(lineage_mat[sel, , drop = FALSE], 1, function(x) names(which.max(x)))
+
+  # Build long data with stack_rank (high-to-low within each peak)
+  long_list <- lapply(seq_along(sel), function(j) {
+    i <- sel[j]
+    row_vals <- lineage_mat[i, ]
+    lin_ord <- order(row_vals, decreasing = TRUE)
+    data.frame(
+      peak_label = labels[i],
+      lineage    = colnames(lineage_mat)[lin_ord],
+      value      = row_vals[lin_ord],
+      stack_rank = seq_along(lin_ord),
+      k          = sel_k[j],
+      dom_lin    = dom_lin[j],
+      max_val    = max(row_vals),
+      stringsAsFactors = FALSE
+    )
+  })
+  long <- do.call(rbind, long_list)
+
+  peak_order <- long %>%
+    dplyr::distinct(peak_label, k, dom_lin, max_val) %>%
+    dplyr::arrange(k, dom_lin, -max_val) %>%
+    dplyr::pull(peak_label)
+  long$peak_label <- factor(long$peak_label, levels = rev(peak_order))
+
+  lin_totals <- tapply(long$value, long$lineage, sum, na.rm = TRUE)
+  lin_levels <- names(sort(lin_totals, decreasing = TRUE))
+  long$lineage <- factor(long$lineage, levels = lin_levels)
+  long <- long %>% dplyr::arrange(peak_label, -value)
+
+  if (!is.null(lineage_colours) && all(lin_levels %in% names(lineage_colours))) {
+    fill_scale <- scale_fill_manual(values = lineage_colours)
+  } else {
+    fill_scale <- ggsci::scale_fill_npg()
+  }
+
+  threshold_pct <- cumvar_threshold * 100
+  n_sel <- length(sel)
+  p <- ggplot(long, aes(x = peak_label, y = value, fill = lineage, group = factor(stack_rank))) +
+    geom_col(position = position_stack(reverse = TRUE), width = 0.85) +
+    geom_hline(yintercept = cumvar_threshold, linetype = "dashed", color = "black", linewidth = 0.3) +
+    coord_flip() +
+    fill_scale +
+    labs(
+      title = paste0("GWAS peaks: top <=", max_k, " lineages explain >=", threshold_pct, "% L2^2"),
+      subtitle = paste0(n_sel, " peaks selected"),
+      x = "Peak / CCV",
+      y = "Lineage L2^2 (sums to 1.0)",
+      fill = "Lineage"
+    ) +
+    theme_bw() +
+    theme(
+      axis.text.y  = element_text(size = 4),
+      axis.text.x  = element_text(size = 6),
+      legend.text  = element_text(size = 7),
+      legend.title = element_text(size = 8),
+      plot.title   = element_text(size = 10)
+    )
+
+  pdf_height <- max(6, n_sel * 0.12 + 3)
+  grDevices::pdf(outfile, width = 12, height = min(pdf_height, 50))
+  print(p)
+  grDevices::dev.off()
+
+  message("  Saved lineage stackbar plot (", n_sel, " peaks): ", outfile)
+  invisible(TRUE)
+}
+
 dominance_dodge_plot <- function(genome_mat, gwas_mat,
                                  ratio_thresh = DEFAULT_RATIO_THRESH,
                                  title_label  = "",
@@ -312,38 +456,49 @@ dominance_dodge_plot <- function(genome_mat, gwas_mat,
   ct_order <- df %>% dplyr::filter(set == "GWAS") %>%
     dplyr::arrange(proportion) %>% dplyr::pull(maximum_ct)
   df$maximum_ct <- factor(df$maximum_ct, levels = ct_order)
-  
-  p <- ggplot(df, aes(x = maximum_ct, y = proportion, fill = set)) +
-    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
-    geom_text(aes(label = bar_label),
-              position = position_dodge(width = 0.8), hjust = -0.05, size = 2.8) +
-    coord_flip() +
-    scale_fill_manual(values = c("Genome-wide" = "grey60", "GWAS" = "firebrick")) +
-    scale_y_continuous(expand = expansion(mult = c(0, 0.30))) +
-    theme_bw() +
-    labs(
-      title    = paste0("Dominant cell types (ratio > ", ratio_thresh, ") ", title_label),
-      subtitle = paste0("Genome-wide: ", nrow(genome_mat), " peaks (", n_dom_genome,
-                        " dominant);  GWAS: ", nrow(gwas_mat), " peaks (", n_dom_gwas,
-                        " dominant)  [* p<0.05  ** p<0.01  *** p<0.001, one-sided proportion test]"),
-      x    = "Cell type",
-      y    = "Proportion within dominant peaks",
-      fill = "Peak set"
-    )
 
-  if (!is.null(lineage_palette)) {
-    ct_cols <- lineage_palette[levels(df$maximum_ct)]
-    ct_cols <- ct_cols[!is.na(ct_cols)]
-    if (length(ct_cols)) {
-      p <- p + theme(axis.text.y = element_text(colour = ct_cols))
-    }
+  # Colour bars by cell type using lineage palette; pattern distinguishes sets
+  if (!is.null(lineage_palette) && all(as.character(df$maximum_ct) %in% names(lineage_palette))) {
+    fill_scale <- scale_fill_manual(values = lineage_palette)
+    p <- ggplot(df, aes(x = maximum_ct, y = proportion, fill = maximum_ct, alpha = set)) +
+      geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+      geom_text(aes(label = bar_label),
+                position = position_dodge(width = 0.8), hjust = -0.05, size = 2.8) +
+      coord_flip() +
+      fill_scale +
+      scale_alpha_manual(values = c("Genome-wide" = 0.4, "GWAS" = 1.0)) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.30))) +
+      guides(fill = guide_legend(order = 1), alpha = guide_legend(order = 2)) +
+      theme_bw()
+  } else {
+    p <- ggplot(df, aes(x = maximum_ct, y = proportion, fill = set)) +
+      geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+      geom_text(aes(label = bar_label),
+                position = position_dodge(width = 0.8), hjust = -0.05, size = 2.8) +
+      coord_flip() +
+      scale_fill_manual(values = c("Genome-wide" = "grey60", "GWAS" = "firebrick")) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.30))) +
+      theme_bw()
   }
+  
+  p <- p + labs(
+    title    = paste0("Dominant cell types (ratio > ", ratio_thresh, ") ", title_label),
+    subtitle = paste0("Genome-wide: ", nrow(genome_mat), " peaks (", n_dom_genome,
+                      " dominant);  GWAS: ", nrow(gwas_mat), " peaks (", n_dom_gwas,
+                      " dominant)  [* p<0.05  ** p<0.01  *** p<0.001, one-sided proportion test]"),
+    x    = "Cell type",
+    y    = "Proportion within dominant peaks",
+    fill = "Cell type",
+    alpha = "Peak set"
+  )
+
   p
 }
 
 dominance_lineage_dodge_plot <- function(genome_mat, gwas_mat, cell_lineage,
                                          ratio_thresh = DEFAULT_RATIO_THRESH,
-                                         title_label  = "") {
+                                         title_label  = "",
+                                         lineage_colours = NULL) {
   dom_genome <- compute_dominance_lineage(genome_mat, cell_lineage, ratio_thresh = ratio_thresh)
   dom_gwas <- compute_dominance_lineage(gwas_mat, cell_lineage, ratio_thresh = ratio_thresh)
 
@@ -398,23 +553,41 @@ dominance_lineage_dodge_plot <- function(genome_mat, gwas_mat, cell_lineage,
     dplyr::arrange(proportion) %>% dplyr::pull(maximum_lineage)
   df$maximum_lineage <- factor(df$maximum_lineage, levels = ct_order)
 
-  ggplot(df, aes(x = maximum_lineage, y = proportion, fill = set)) +
-    geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
-    geom_text(aes(label = bar_label),
-              position = position_dodge(width = 0.8), hjust = -0.05, size = 2.8) +
-    coord_flip() +
-    scale_fill_manual(values = c("Genome-wide" = "grey60", "GWAS" = "firebrick")) +
-    scale_y_continuous(expand = expansion(mult = c(0, 0.30))) +
-    theme_bw() +
-    labs(
-      title = paste0("Dominant lineages (ratio > ", ratio_thresh, ") ", title_label),
-      subtitle = paste0("Genome-wide: ", nrow(genome_mat), " peaks (", n_dom_genome,
-                        " dominant);  GWAS: ", nrow(gwas_mat), " peaks (", n_dom_gwas,
-                        " dominant)  [* p<0.05  ** p<0.01  *** p<0.001, one-sided proportion test]"),
-      x = "Lineage",
-      y = "Proportion within dominant peaks",
-      fill = "Peak set"
-    )
+  # Colour bars by lineage using lineage colours; alpha distinguishes sets
+  if (!is.null(lineage_colours) && all(as.character(df$maximum_lineage) %in% names(lineage_colours))) {
+    fill_scale <- scale_fill_manual(values = lineage_colours)
+    p <- ggplot(df, aes(x = maximum_lineage, y = proportion, fill = maximum_lineage, alpha = set)) +
+      geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+      geom_text(aes(label = bar_label),
+                position = position_dodge(width = 0.8), hjust = -0.05, size = 2.8) +
+      coord_flip() +
+      fill_scale +
+      scale_alpha_manual(values = c("Genome-wide" = 0.4, "GWAS" = 1.0)) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.30))) +
+      guides(fill = guide_legend(order = 1), alpha = guide_legend(order = 2)) +
+      theme_bw()
+  } else {
+    p <- ggplot(df, aes(x = maximum_lineage, y = proportion, fill = set)) +
+      geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+      geom_text(aes(label = bar_label),
+                position = position_dodge(width = 0.8), hjust = -0.05, size = 2.8) +
+      coord_flip() +
+      scale_fill_manual(values = c("Genome-wide" = "grey60", "GWAS" = "firebrick")) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.30))) +
+      theme_bw()
+  }
+
+  p <- p + labs(
+    title = paste0("Dominant lineages (ratio > ", ratio_thresh, ") ", title_label),
+    subtitle = paste0("Genome-wide: ", nrow(genome_mat), " peaks (", n_dom_genome,
+                      " dominant);  GWAS: ", nrow(gwas_mat), " peaks (", n_dom_gwas,
+                      " dominant)  [* p<0.05  ** p<0.01  *** p<0.001, one-sided proportion test]"),
+    x = "Lineage",
+    y = "Proportion within dominant peaks",
+    fill = "Lineage",
+    alpha = "Peak set"
+  )
+  p
 }
 
 plot_specificity_bar <- function(specificity_summary_l2, se_name, trait_name, plots_dir) {
@@ -442,14 +615,236 @@ plot_specificity_bar <- function(specificity_summary_l2, se_name, trait_name, pl
   invisible(p_spec_l2)
 }
 
+# ---------------------------------------------------------------
+# Plot 1: Density of max L2 specificity per GWAS peak
+# Shows the distribution of maximum_score (max L2 across cell types)
+# for GWAS peaks vs genome-wide peaks, with threshold lines.
+# ---------------------------------------------------------------
+plot_specificity_density <- function(mat_l2, gwas_mat, se_name, trait_name, plots_dir) {
+  if (!nrow(gwas_mat)) return(invisible(NULL))
+  n_cells <- ncol(gwas_mat)
+  high_thresh <- 1 / sqrt(2)
+  mid_thresh  <- 1 / sqrt(n_cells)
+
+  gwas_max  <- apply(gwas_mat, 1, max)
+  genome_max <- apply(mat_l2, 1, max)
+  df <- rbind(
+    data.frame(max_l2 = genome_max, set = "Genome-wide"),
+    data.frame(max_l2 = gwas_max,   set = "GWAS")
+  )
+
+  p <- ggplot(df, aes(x = max_l2, fill = set, colour = set)) +
+    geom_density(alpha = 0.35, linewidth = 0.6) +
+    geom_vline(xintercept = high_thresh, linetype = "dashed", colour = "red") +
+    geom_vline(xintercept = mid_thresh,  linetype = "dotted", colour = "orange") +
+    annotate("text", x = high_thresh, y = Inf, label = "high", vjust = 2, hjust = -0.1, colour = "red", size = 3) +
+    annotate("text", x = mid_thresh,  y = Inf, label = "mid",  vjust = 2, hjust = -0.1, colour = "orange", size = 3) +
+    scale_fill_manual(values = c("Genome-wide" = "grey70", "GWAS" = "#2166AC")) +
+    scale_colour_manual(values = c("Genome-wide" = "grey40", "GWAS" = "#2166AC")) +
+    labs(
+      title = paste0(se_name, " x ", trait_name, " — Max L2 specificity per peak"),
+      subtitle = paste0("high > 1/sqrt(2) = ", round(high_thresh, 3),
+                        ";  mid > 1/sqrt(", n_cells, ") = ", round(mid_thresh, 3)),
+      x = "Max L2 specificity (across cell types)",
+      y = "Density",
+      fill = "Peak set", colour = "Peak set"
+    ) +
+    theme_bw()
+
+  ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_l2_specificity_density.pdf")),
+         p, width = 7, height = 5)
+  invisible(p)
+}
+
+# ---------------------------------------------------------------
+# Plot 2: Weighted specificity — max_L2 x weight (mean raw accessibility)
+# Scatter of max L2 vs weight for GWAS peaks. Peaks that are both
+# specific AND accessible are top-right and most biologically relevant.
+# Weight-scaled specificity = max_L2 * weight.
+# ---------------------------------------------------------------
+plot_specificity_weighted <- function(specificity_summary_l2, se_name, trait_name, plots_dir,
+                                      lineage_palette = NULL) {
+  if (!nrow(specificity_summary_l2) || all(is.na(specificity_summary_l2$weight))) return(invisible(NULL))
+  n_cells <- max(specificity_summary_l2$n_high + specificity_summary_l2$n_mid + specificity_summary_l2$n_low, na.rm = TRUE)
+  high_thresh <- 1 / sqrt(2)
+
+  df <- specificity_summary_l2 %>%
+    dplyr::mutate(
+      specificity_tier = dplyr::case_when(
+        is_dominant ~ "Dominant (ratio >= 2)",
+        maximum_score > high_thresh ~ "Highly specific",
+        TRUE ~ "Other"
+      ),
+      specificity_tier = factor(specificity_tier,
+                                levels = c("Dominant (ratio >= 2)", "Highly specific", "Other")),
+      weighted_specificity = maximum_score * weight
+    )
+
+  tier_colours <- c(
+    "Dominant (ratio >= 2)" = "#B2182B",
+    "Highly specific" = "#2166AC",
+    "Other" = "grey60"
+  )
+
+  p <- ggplot(df, aes(x = weight, y = maximum_score)) +
+    geom_point(aes(colour = specificity_tier), alpha = 0.6, size = 2) +
+    geom_hline(yintercept = high_thresh, linetype = "dashed", colour = "red", alpha = 0.5) +
+    scale_colour_manual(values = tier_colours) +
+    labs(
+      title = paste0(se_name, " x ", trait_name, " — Specificity vs Accessibility"),
+      subtitle = "Top-right = specific AND accessible peaks (most biologically relevant)",
+      x = "Mean raw accessibility (weight = rowMean of raw counts)",
+      y = "Max L2 specificity",
+      colour = "Specificity tier"
+    ) +
+    theme_bw()
+
+  ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_l2_specificity_vs_weight.pdf")),
+         p, width = 8, height = 6)
+  invisible(p)
+}
+
+# ---------------------------------------------------------------
+# Plot: Weight (mean raw accessibility) vs distance to nearest TSS
+# Colour encodes TSS bin (core_prom, prox_prom, near_reg, distal, long_range).
+# ---------------------------------------------------------------
+plot_weight_vs_tss <- function(specificity_summary_l2, se_name, trait_name, plots_dir) {
+  if (!nrow(specificity_summary_l2) ||
+      all(is.na(specificity_summary_l2$dist_to_tss)) ||
+      all(is.na(specificity_summary_l2$weight))) return(invisible(NULL))
+
+  bin_levels <- c("core_prom", "prox_prom", "near_reg", "distal", "long_range")
+
+  df <- specificity_summary_l2 %>%
+    dplyr::filter(!is.na(dist_to_tss), !is.na(weight)) %>%
+    dplyr::mutate(
+      tss_bin = factor(tss_bin, levels = bin_levels),
+      log_dist = log10(dist_to_tss + 1)
+    )
+
+  p <- ggplot(df, aes(x = log_dist, y = weight, colour = tss_bin)) +
+    geom_point(alpha = 0.6, size = 2.2) +
+    ggsci::scale_colour_igv() +
+    geom_vline(xintercept = log10(c(1000, 5000, 50000, 200000)),
+               linetype = "dotted", colour = "grey50", linewidth = 0.3) +
+    labs(
+      title = paste0(se_name, " x ", trait_name, " \u2014 Weight vs TSS distance"),
+      subtitle = "Mean raw accessibility by distance to nearest TSS",
+      x = expression(log[10](distance~to~nearest~TSS + 1)),
+      y = "Mean raw accessibility (weight)",
+      colour = "TSS bin"
+    ) +
+    theme_bw() +
+    theme(legend.position = "right")
+
+  ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_weight_vs_tss.pdf")),
+         p, width = 8, height = 6)
+  invisible(p)
+}
+
+# ---------------------------------------------------------------
+# Plot: Lineage-level inter-peak correlation heatmap
+# Computes peak-by-lineage matrix (L2^2 summed per lineage group)
+# then shows the inter-lineage Pearson correlation.
+# ---------------------------------------------------------------
+plot_lineage_cor_heatmap <- function(mat_l2, cell_lineage, label, plots_dir,
+                                     lineage_colours = NULL) {
+  lineage_mat <- compute_lineage_matrix(mat_l2, cell_lineage)
+  if (ncol(lineage_mat) < 2) return(invisible(NULL))
+  cor_lin <- cor(lineage_mat, use = "pairwise.complete.obs")
+
+  # Dynamic colour scale based on actual correlation range
+  rng <- range(cor_lin, na.rm = TRUE)
+  mid <- (rng[1] + rng[2]) / 2
+  col_fun <- circlize::colorRamp2(c(rng[1], mid, rng[2]), c("#2166AC", "white", "#B2182B"))
+
+  # Row/column colour annotation from lineage palette
+  ha <- NULL
+  if (!is.null(lineage_colours)) {
+    lg_names <- colnames(lineage_mat)
+    lg_cols <- lineage_colours[lg_names]
+    lg_cols <- lg_cols[!is.na(lg_cols)]
+    if (length(lg_cols) == length(lg_names)) {
+      ha <- ComplexHeatmap::HeatmapAnnotation(
+        Lineage = lg_names,
+        col = list(Lineage = setNames(lg_cols, lg_names)),
+        show_legend = FALSE
+      )
+    }
+  }
+
+  out <- file.path(plots_dir, label)
+  dir.create(out, recursive = TRUE, showWarnings = FALSE)
+  fname <- file.path(out, paste0(label, "_lineage_cor_heatmap.pdf"))
+  grDevices::pdf(fname, width = 8, height = 7)
+  ht <- ComplexHeatmap::Heatmap(
+    cor_lin,
+    name = "Pearson r",
+    col = col_fun,
+    column_title = paste0(label, " — Lineage L2^2 correlation",
+                          "  [range: ", round(rng[1], 2), " to ", round(rng[2], 2), "]"),
+    top_annotation = ha,
+    show_row_dend = TRUE, show_column_dend = TRUE,
+    row_names_gp = grid::gpar(fontsize = 7),
+    column_names_gp = grid::gpar(fontsize = 7)
+  )
+  ComplexHeatmap::draw(ht)
+  grDevices::dev.off()
+  invisible(fname)
+}
+
+# ---------------------------------------------------------------
+# Plot: Per-lineage L2^2 density distributions
+# Shows the distribution of L2^2 values for each lineage group,
+# coloured by lineage master hues.
+# ---------------------------------------------------------------
+plot_lineage_densities <- function(mat_l2, cell_lineage, label, plots_dir,
+                                    lineage_colours = NULL) {
+  lineage_mat <- compute_lineage_matrix(mat_l2, cell_lineage)
+  if (ncol(lineage_mat) < 1) return(invisible(NULL))
+
+  long <- as.data.frame(lineage_mat) %>%
+    tidyr::pivot_longer(cols = dplyr::everything(),
+                        names_to = "lineage", values_to = "L2_sq")
+
+  if (!is.null(lineage_colours) &&
+      all(unique(long$lineage) %in% names(lineage_colours))) {
+    colour_scale <- scale_colour_manual(values = lineage_colours)
+  } else {
+    colour_scale <- ggsci::scale_colour_npg()
+  }
+
+  p <- ggplot(long, aes(x = L2_sq, colour = lineage)) +
+    geom_density(linewidth = 0.7) +
+    colour_scale +
+    labs(
+      title = paste0(label, " — Lineage L2^2 density distributions"),
+      subtitle = "L2^2 summed within lineage groups (sums to 1 per peak)",
+      x = "Lineage L2^2",
+      y = "Density",
+      colour = "Lineage"
+    ) +
+    theme_bw() +
+    theme(legend.position = "bottom")
+
+  out <- file.path(plots_dir, label)
+  dir.create(out, recursive = TRUE, showWarnings = FALSE)
+  fname <- file.path(out, paste0(label, "_lineage_densities.pdf"))
+  ggsave(fname, p, width = 8, height = 5)
+  invisible(fname)
+}
+
 plot_dominance <- function(mat_l2, gwas_mat, se_name, trait_name, plots_dir, lineage_palette = NULL) {
   p_dom_l2 <- dominance_dodge_plot(mat_l2, gwas_mat, title_label = "L2mat", lineage_palette = lineage_palette)
   ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_dominance_l2.pdf")), p_dom_l2, width = 8, height = 6)
   invisible(p_dom_l2)
 }
 
-plot_dominance_lineage <- function(mat_l2, gwas_mat, cell_lineage, se_name, trait_name, plots_dir) {
-  p_dom_lineage <- dominance_lineage_dodge_plot(mat_l2, gwas_mat, cell_lineage = cell_lineage, title_label = "lineage-summed L2^2")
+plot_dominance_lineage <- function(mat_l2, gwas_mat, cell_lineage, se_name, trait_name, plots_dir,
+                                    lineage_colours = NULL) {
+  p_dom_lineage <- dominance_lineage_dodge_plot(mat_l2, gwas_mat, cell_lineage = cell_lineage,
+                                                title_label = "lineage-summed L2^2",
+                                                lineage_colours = lineage_colours)
   ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_dominance_lineage_l2.pdf")), p_dom_lineage, width = 8, height = 6)
   invisible(p_dom_lineage)
 }
@@ -519,7 +914,8 @@ plot_coherence <- function(locus_results, se_name, trait_name, plots_dir) {
   invisible(p_locus_cat)
 }
 
-plot_coherence_consensus <- function(locus_results_consensus, se_name, trait_name, plots_dir) {
+plot_coherence_consensus <- function(locus_results_consensus, se_name, trait_name, plots_dir,
+                                      lineage_colours = NULL) {
   if (!nrow(locus_results_consensus)) return(invisible(NULL))
 
   plot_df <- locus_results_consensus %>%
@@ -585,7 +981,7 @@ plot_coherence_consensus <- function(locus_results_consensus, se_name, trait_nam
       ),
       drop = FALSE
     ) +
-    theme_bw() + ggsci::scale_color_igv() +
+    theme_bw() +
     labs(
       x = "Weighted consensus (lineage)",
       y = "-log10(p-value)",
@@ -594,10 +990,18 @@ plot_coherence_consensus <- function(locus_results_consensus, se_name, trait_nam
   ggsave(file.path(plots_dir, paste0(se_name, "_", trait_name, "_locus_concordance_consensus_lineage.pdf")),
          p_consensus_lineage, width = 8, height = 6)
 
+  # Use lineage colours for dominant_lineage_consensus if available
+  if (!is.null(lineage_colours)) {
+    z_colour_scale <- scale_colour_manual(values = lineage_colours)
+  } else {
+    z_colour_scale <- ggsci::scale_colour_npg()
+  }
+
   p_consensus_z <- ggplot(plot_df, aes(y = z_score, x = n_peaks)) +
     geom_hline(yintercept = 0, linetype = "dashed") +
-    geom_point(aes(color = dominant_lineage_consensus, shape = category), alpha = 0.8) +
-    theme_bw() + ggsci::scale_color_igv() +
+    geom_point(aes(colour = dominant_lineage_consensus, shape = category), alpha = 0.8) +
+    z_colour_scale +
+    theme_bw() +
     labs(
       x = "Number of GWAS peaks",
       y = "Z score (consensus)",
