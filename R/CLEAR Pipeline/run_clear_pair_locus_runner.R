@@ -172,13 +172,11 @@ run_clear <- function() {
   high_thresh <- 1 / sqrt(2) # this is that one cell type or lineage takes more than 50%
   mid_thresh <- 1 / sqrt(ncol(mat_l2))
   specificity_summary_l2 <<- addSpecificity(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
-                                            cell_lineage = lineage_obj$cell_lineage, se_gwas = se_gwas,
-                                            gtf_path = gtf_path)
+                                            cell_lineage = lineage_obj$cell_lineage, se_gwas = se_gwas)
   plot_specificity_bar(specificity_summary_l2, se_name, trait_name, plots_dir)
   plot_specificity_density(mat_l2, gwas_mat, se_name, trait_name, plots_dir)
   plot_specificity_weighted(specificity_summary_l2, se_name, trait_name, plots_dir,
                             lineage_palette = lineage_obj$palette)
-  plot_weight_vs_tss(specificity_summary_l2, se_name, trait_name, plots_dir)
   plot_celltype_stackbars(
     se_gwas,
     value_metric = "raw_l2",

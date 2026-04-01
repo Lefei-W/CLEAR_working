@@ -555,7 +555,8 @@ dominance_lineage_dodge_plot <- function(genome_mat, gwas_mat, cell_lineage,
 
   # Colour bars by lineage using lineage colours; alpha distinguishes sets
   if (!is.null(lineage_colours) && all(as.character(df$maximum_lineage) %in% names(lineage_colours))) {
-    fill_scale <- scale_fill_manual(values = lineage_colours)
+    fill_scale <- scale_fill_manual(values = lineage_colours,
+                                     labels = function(x) sapply(x, function(lab) paste(strwrap(gsub(":", ", ", lab), width = 28), collapse = "\n"), USE.NAMES = FALSE))
     p <- ggplot(df, aes(x = maximum_lineage, y = proportion, fill = maximum_lineage, alpha = set)) +
       geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
       geom_text(aes(label = bar_label),
@@ -577,6 +578,12 @@ dominance_lineage_dodge_plot <- function(genome_mat, gwas_mat, cell_lineage,
       theme_bw()
   }
 
+  # Wrap long lineage labels (colon-separated cell types) to prevent overflow
+  wrap_lineage <- function(x, width = 28) {
+    sapply(x, function(lab) paste(strwrap(gsub(":", ", ", lab), width = width), collapse = "\n"),
+           USE.NAMES = FALSE)
+  }
+
   p <- p + labs(
     title = paste0("Dominant lineages (ratio > ", ratio_thresh, ") ", title_label),
     subtitle = paste0("Genome-wide: ", nrow(genome_mat), " peaks (", n_dom_genome,
@@ -586,7 +593,8 @@ dominance_lineage_dodge_plot <- function(genome_mat, gwas_mat, cell_lineage,
     y = "Proportion within dominant peaks",
     fill = "Lineage",
     alpha = "Peak set"
-  )
+  ) +
+    scale_x_discrete(labels = wrap_lineage)
   p
 }
 
