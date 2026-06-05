@@ -9,7 +9,7 @@ library(S4Vectors)
 
 setwd('/working/lab_jonathb/lefeiW/projects/CLEAR_data/traits/')
 
-proxy_url <- "http://lefei.wang:Mrhuai990116&7@webproxy.adqimr.ad.lan:8080/"
+proxy_url <- "http://lefei.wang:Mrhuai990116*8@webproxy.adqimr.ad.lan:8080/"
 
 Sys.setenv(
   http_proxy  = proxy_url,
@@ -24,7 +24,7 @@ r <- GET(
     url = "webproxy.adqimr.ad.lan",
     port = 8080,
     username = "lefei.wang",
-    password = "Mrhuai990116&7"
+    password = "Mrhuai990116*8"
   ),
   timeout(30)
 )
@@ -92,7 +92,7 @@ gql_post <- function(query, variables) {
       url = "webproxy.adqimr.ad.lan",
       port = 8080,
       username = "lefei.wang",
-      password = "Mrhuai990116&7"
+      password = "Mrhuai990116*8"
     ),
     timeout(60)
   )
