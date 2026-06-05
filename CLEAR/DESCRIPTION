@@ -7,9 +7,10 @@ Authors@R: c(
            role = c("aut", "cre")))
 Description: Quantifies cell-type and lineage specificity of chromatin
     accessibility at GWAS variant loci. Provides L2-based specificity scores,
-    dominance and threshold-consensus metrics, lineage hierarchy construction,
-    and locus-level concordance testing for credible-causal variant peaks
-    against single-nucleus ATAC-seq reference matrices.
+    dominance and coherence metrics, lineage hierarchy construction,
+    and genome-wide permutation analysis for locus-level conherence testing of signals with multiple 
+    candidate causal variant peaks
+    against single-nucleus ATAC-seq reference matrices (cell type-specific markers and housekeeping genes).
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: false
@@ -22,8 +23,15 @@ biocViews:
     GenomeWideAssociation,
     SingleCell,
     ATACSeq,
-    ChIPSeq,
-    FunctionalGenomics
+    GWAS,
+    FunctionalGenomics,
+    CellTypeSpecificity,
+    DataVisualization,
+    PermutationTest,
+    GenomeWideEnrichment,
+    lineage,
+    coherence,
+    dominance
 Depends:
     R (>= 4.2)
 Imports:
@@ -49,7 +57,8 @@ Imports:
     stats,
     utils,
     rtracklayer,
-    methods
+    methods,
+    GenomeInfoDb
 Suggests:
     svglite,
     testthat (>= 3.0.0),

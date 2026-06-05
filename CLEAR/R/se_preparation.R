@@ -107,8 +107,8 @@ addSEMetrics <- function(se, assay_name = NULL, keep_top_prop = NULL) {
   assays(se)[["raw"]]         <- mat
   assays(se)[["raw_l2"]]      <- raw_l2
   assays(se)[["raw_l2_rank"]] <- .rankDesc(raw_l2)
-  assays(se)[["cor_raw"]]     <- cor_raw
-  assays(se)[["cor_raw_l2"]]  <- cor_raw_l2
+  # assays(se)[["cor_raw"]]     <- cor_raw
+  # assays(se)[["cor_raw_l2"]]  <- cor_raw_l2
 
   metadata(se)$CLEAR <- list(
     source_assay  = assay_name,
