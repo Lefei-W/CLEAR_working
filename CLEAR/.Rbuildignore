@@ -1,0 +1,15 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^README\.Rmd$
+^LICENSE\.md$
+^\.github$
+^docs$
+^_pkgdown\.yml$
+^pkgdown$
+^cran-comments\.md$
+^doc$
+^Meta$
+^master_runner\.R$
+^run_CLEAR_interactive\.R$
+^vignettes/gwas_input_tutorial\.md$
+^R/old_02-06$

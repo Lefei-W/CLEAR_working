@@ -1,0 +1,3 @@
+# Placeholder NAMESPACE — will be overwritten by `devtools::document()`
+# once roxygen `@export` tags are present in R/*.R.
+exportPattern("^[^\\.]")
