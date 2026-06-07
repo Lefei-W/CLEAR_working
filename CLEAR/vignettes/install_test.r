@@ -11,6 +11,11 @@ remotes::install_github(
 )
 
 # ============================================================
+# Load packages --> load inputs --> process SE (add L2) --> inspect dendrogram + pick k_lineage
+# --> add GWAS overlap + inspect results --> write and plot specificity (dominant peaks) --> add locus-level coherence  
+# ============================================================
+
+# ============================================================
 # 1. Load environment
 # ============================================================
 
@@ -52,7 +57,7 @@ gtf_path   <- "gencode.v49.chr_patch_hapl_scaff.annotation.gtf.gz"
 #   results/         tables, summary files
 #   plots/           PDFs
 #   data/            generic working data (rarely used)
-#   processed_data/  cached processed SE (raw + L2 assays)
+#   processed_data/  processed SE (raw + L2 assays)
 # ============================================================
 run_tag <- paste0(se_name, "_x_", trait_name)
 out_dir <- file.path(getwd(), run_tag)
@@ -68,11 +73,7 @@ message("Output folder: ", out_dir)
 
 
 # ============================================================
-# 3. Load + cache SE; compute L2 metrics
-# ------------------------------------------------------------
-# Processed SE (raw + raw_l2 + raw_l2_rank assays) is written
-# to processed_data/<se_name>_processed.rds; subsequent runs
-# reuse the cache instead of re-normalising.
+# 3. Load + process SE; compute L2 metrics
 # ============================================================
 
 CLEAR::prepareSE
@@ -110,10 +111,6 @@ message("SE: ", nrow(se), " peaks x ", ncol(se), " cell types")
 # rectangles. Open the PDF, pick the k that best separates the
 # biology, then continue.
 # ============================================================
-lineage_preview <- addLineageMap(mat_l2, k_lineage = 2L)  # placeholder k
-plotLineageDendrogram(lineage_preview, se_name, plots_dir,
-                      k_preview = 3:6)
-#  -> plots/<se_name>_celltype_lineage_dendrogram.pdf
 
 # Pick k after inspecting the plot:
 k_lineage  <- 4L
@@ -128,3 +125,34 @@ snps     <- readRDS(trait_path)
 overlap  <- addGWASOverlap(se, snps)
 se_gwas  <- overlap$se_gwas
 gwas_mat <- overlap$gwas_mat
+
+if (nrow(gwas_mat) > 0) {
+  n_sig <- length(unique(na.omit(unlist(
+    strsplit(as.character(rowData(se_gwas)$signal), ",")))))
+  saveRDS(se_gwas, file.path(results_dir,
+          paste0(se_name, "_", trait_name, "_",
+                 nrow(gwas_mat), "peaks_", n_sig, "signals.rds")))
+}
+
+# ============================================================
+# 6. Correlation heatmaps + per-cell-type densities
+# ============================================================
+plotAssayCorHeatmaps(se, se_name, plots_dir)
+plotAssayDensities(se, se_name, plots_dir,
+                   lineage_palette = lineage_obj$palette)
+plotLineageCorHeatmap(mat_l2, lineage_obj$cell_lineage, se_name, plots_dir,
+                      lineage_colours = lineage_obj$lineage_colours)
+plotLineageDensities(mat_l2, lineage_obj$cell_lineage, se_name, plots_dir,
+                     lineage_colours = lineage_obj$lineage_colours)
+
+if (nrow(gwas_mat) > 1) {
+  tag <- paste0(se_name, "_", trait_name, "_GWAS")
+  plotAssayCorHeatmaps(se_gwas, tag, plots_dir)
+  plotAssayDensities(se_gwas, tag, plots_dir,
+                     lineage_palette = lineage_obj$palette)
+  plotLineageCorHeatmap(gwas_mat, lineage_obj$cell_lineage, tag, plots_dir,
+                        lineage_colours = lineage_obj$lineage_colours)
+  plotLineageDensities(gwas_mat, lineage_obj$cell_lineage, tag, plots_dir,
+                       lineage_colours = lineage_obj$lineage_colours)
+}
+

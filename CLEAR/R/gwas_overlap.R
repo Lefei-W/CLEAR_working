@@ -24,7 +24,7 @@ loadCLEARInputs <- function(se_path, trait_path) {
 # and the raw findOverlaps Hits object.
 # ------------------------------------------------------------
 addGWASOverlap <- function(se, snps) {
-  hits_se <- findOverlaps(snps, rowRanges(se))
+  hits_se <- findOverlaps(snps, rowRanges(se)) # query = snps, subject = peaks
   gwas_idx <- unique(subjectHits(hits_se))
 
   if (!length(gwas_idx)) {
