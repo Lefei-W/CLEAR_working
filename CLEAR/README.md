@@ -1,6 +1,6 @@
 # CLEAR
 
-**C**ell-type-resolved and **L**ocus-specific **E**nrichment **A**nalysis by **R**anking
+**C**ell-type-resolved **L**ocus-specific **E**nrichment **A**nalysis by **R**anking
 
 > Quantifies the cell-type and lineage specificity of chromatin accessibility
 > at GWAS variant loci, and tests whether candidate causal variants at the same
@@ -10,6 +10,10 @@
 
 Early development (v0.90). 
 
+**Note** *upcoming* - Locus-level coherence analysis with marker genes and housekeeping genes analysis, genome-wide background distribution permutations for significance testing of coherence.
+
+Locus-level coherence can be assessed by asking whether multiple variant-overlapping peaks within the same GWAS locus show concordant L2 specificity profiles or share the same dominant lineage/cell type. Empirical significance can be estimated by comparing the observed coherence against matched random peak sets with similar TSS distance and local peak-density properties. Pre-built tissue-specific background models for faster coherence testing are in development.
+
 ## Installation
 
 ```r
@@ -17,7 +21,7 @@ install.packages(c("remotes", "BiocManager"),
                  repos = "https://cloud.r-project.org")
 
 remotes::install_github(
-  repo         = "Lefei-W/CLEAR_personal",
+  repo         = "Lefei-W/CLEAR_working",
   subdir       = "CLEAR",
   dependencies = TRUE,     # CRAN + Bioconductor (auto via biocViews:)
   upgrade      = "never"

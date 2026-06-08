@@ -13,6 +13,8 @@ remotes::install_github(
 # ============================================================
 # Load packages --> load inputs --> process SE (add L2) --> inspect dendrogram + pick k_lineage
 # --> add GWAS overlap + inspect results --> write and plot specificity (dominant peaks) --> add locus-level coherence  
+# Pre-built genome-wide background distribution for coherence significance testing 
+# (permuting peaks across the genome, binning by peak density and TSS distance) is in development and will be added in the near future.
 # ============================================================
 
 # ============================================================

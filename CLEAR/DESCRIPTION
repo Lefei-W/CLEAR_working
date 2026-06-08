@@ -5,7 +5,7 @@ Version: 0.90
 Authors@R: c(
     person("Lefei", "Wang", email = "lefei.wang@qimrberghofer.edu.au",
            role = c("aut", "cre")))
-Description: Quantifies cell-type and lineage specificity of chromatin
+Description: CLEAR quantifies cell-type and lineage specificity of chromatin
     accessibility at GWAS variant loci. Provides L2-based specificity scores,
     dominance and coherence metrics, lineage hierarchy construction,
     and genome-wide permutation analysis for locus-level conherence testing of signals with multiple 
