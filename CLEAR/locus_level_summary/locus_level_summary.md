@@ -21,6 +21,8 @@ For each subset we count dominant peaks and, compute the **fraction of
 peaks that are dominant**. That fraction is the main metric (below); the rest
 of the columns are variables (*potential confounders*) to plot against it.
 
+Currently controlling for locus size (n_snp, span, peak counts, TSS density). Coherence could be driven by other potential confounders. A locus can look 'coherent' with few dominant peaks, we should condition on number of variant peaks and dominant peaks (less stringent dominance threshold). 
+We can also construct a tissue-level baseline (permutation). 
 
 ## Column dictionary
 
@@ -30,7 +32,7 @@ Geometry / context:
 |---|---|
 | `locus`, `gwas`, `tissue` | identifiers |
 | `matched` | is this the tissue matched to the trait (BCAC↔breast, HF↔heart) |
-| `pass_filter` | `variant_n_peaks > 1` more than 1 SNP-overlapping peak |
+| `pass_filter` | `variant_n_peaks > 1` (i.e. ≥ 2 SNP-overlapping peaks) — locus has enough variant peaks |
 | `seqnames` | chromosome |
 | `n_snp` | credible SNPs in the locus |
 | `snp_span_start/end`, `snp_span_width_bp` | extent of the credible set = the **signal-wise span** (first SNP → last SNP) |
@@ -39,7 +41,8 @@ Geometry / context:
 | `gene_density_per_kb` | `n_tss_in_window / (window_width_bp / 1000)` |
 
 Dominance summary, prefixed `variant_` (variant / SNP-overlapping subset), `signal_`
-(signal-wise subset) and `window_` (± 100 kb window subset) with increased number of peaks e.g. `variant_n_peaks ≤ signal_n_peaks ≤ window_n_peaks`:
+(signal / SNP-span subset) and `window_` (± 100 kb window subset). The three subsets are
+nested (variant ⊆ signal ⊆ window), so e.g. `variant_n_peaks ≤ signal_n_peaks ≤ window_n_peaks`:
 | column (drop prefix) | meaning |
 |---|---|
 | `n_peaks` | peaks in the subset |
@@ -53,6 +56,15 @@ Dominance summary, prefixed `variant_` (variant / SNP-overlapping subset), `sign
 | **`frac_toplin_of_dom_r15`, `frac_toplin_of_dom_r20`** | **lineage share among dominant peaks** |
 | `dom_cell_list` | `;`-joined dominant cell labels, strongest first (repeats kept) |
 | `dom_lin_list` | same at lineage level |
+
+### `signal_peaks_<tissue>.csv` — one row per peak inside the SNP span
+All peaks overlapping `[snp_span_start, snp_span_end]` (first SNP → last SNP, **no**
+± 100 kb expansion). Same metric columns as the variant table, plus `is_variant_peak`
+(TRUE if the peak also overlaps a credible SNP). No `gwas_snps` / `n_snps`.
+
+### `window_peaks_<tissue>.csv` — one row per peak in the ± 100 kb window
+Same metric columns as the variant table, plus `is_variant_peak` (TRUE if the peak
+also overlaps a credible SNP). No `gwas_snps` / `n_snps`.
 
 ### `locus_snp_level.csv` — one row per credible SNP
 | column | meaning |
@@ -81,11 +93,5 @@ Dominance summary, prefixed `variant_` (variant / SNP-overlapping subset), `sign
 | `top_lineage_is_dominant_r15/r20` | top_lineage_ratio > 1.5 / > 2 |
 | `dist_to_tss`, `nearest_tss_gene`, `tss_bin` | nearest-TSS annotation of the peak |
 
-### `signal_peaks_<tissue>.csv` — one row per peak inside the SNP span
-All peaks overlapping `[snp_span_start, snp_span_end]` (first SNP → last SNP, **no**
-± 100 kb expansion). Same metric columns as the variant table, plus `is_variant_peak`
-(TRUE if the peak also overlaps a credible SNP). No `gwas_snps` / `n_snps`.
 
-### `window_peaks_<tissue>.csv` — one row per peak in the ± 100 kb window
-Same metric columns as the variant table, plus `is_variant_peak` (TRUE if the peak
-also overlaps a credible SNP). No `gwas_snps` / `n_snps`.
+
