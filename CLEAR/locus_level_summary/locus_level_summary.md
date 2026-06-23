@@ -24,6 +24,22 @@ of the columns are variables (*potential confounders*) to plot against it.
 Currently controlling for locus size (n_snp, span, peak counts, TSS density). Coherence could be driven by other potential confounders. A locus can look 'coherent' with few dominant peaks, we should condition on number of variant peaks and dominant peaks (less stringent dominance threshold). 
 We can also construct a tissue-level baseline (permutation). 
 
+## 23/06/2026 Discussion with Jonno:
+
+The three are **nested**: variant ⊆ signal ⊆ window. The variant overlapping peaks and dominant peaks are the key focus of the analysis, signal and window are considered as background context. We are interested in the fraction of dominant peaks among the variant peaks, and how it differs compared to loci and window fractions.
+
+This can be turned into a 2X3 contigency table (dominant / non-dominant × variant / signal / window) and test with Fisher's exact test, or Wilcoxon test, or proportion z-test.
+
+Noticed that the variant overlapping peaks are small numbers and the fraction of dominant peaks are concentrated at 0 0.5 and 1, so the statistical test may not be powerful. We can separate the loci into complex and simple loci, for complex loci with more variant peaks, the coherence metric is more meaningful, and for simple loci with limited variant peaks or dominant peaks (categorising by number of dominant peaks could be biased towards artificial coherence). 
+e.g. 32 loci with more than 5 variant peaks, and 8 loci with more than 10 variant peaks, and the coherence metric is more meaningful for these complex loci.
+e.g. 19 loci with more than 3 dominant peaks.
+e.g. 16 loci with more than 5 variant peaks and more than 3 dominant peaks at dominance ratio > 2.
+e.g. 24 loci with more than 5 variant peaks and more than 3 dominant peaks at dominance ratio > 1.5.
+
+Hypothesis: since we were able to identify global enrichment patterns in the mature luminal cells and mammary epithelial lineage for breast cancer a
+
+For complex loci we can annotate with coherence metric, and for simple loci we can annotate with at variant level, the top cell type and its dominance ratio. e.g. mammographic density with small sample size, only 33 variant peaks, but we can still annotate the top cell type and its dominance ratio, and identify significant global enrichment in adipocytes and fibroblasts in breast tissue. 
+
 ## Column dictionary
 
 ### `locus_summary_<tissue>.csv` — one row per gwas × locus
