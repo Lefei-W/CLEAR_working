@@ -13,9 +13,7 @@
   )
 }
 
-# cor_raw and cor_raw_l2 are kept in se_preparation as optional assays
-# (corpcor-weighted versions), but not used in the current pipeline.
-# Only raw and raw_l2 are plotted for QC.
+# QC compares input accessibility with the analysis specificity matrix.
 PLOT_ASSAYS <- c("raw", "raw_l2")
 
 plotAssayCorHeatmaps <- function(se, tissue, plot_dir = "plots") {

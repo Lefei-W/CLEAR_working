@@ -5,12 +5,12 @@ Version: 0.90
 Authors@R: c(
     person("Lefei", "Wang", email = "lefei.wang@qimrberghofer.edu.au",
            role = c("aut", "cre")))
-Description: CLEAR quantifies cell-type and lineage specificity of chromatin
-    accessibility at GWAS variant loci. Provides L2-based specificity scores,
-    dominance and coherence metrics, lineage hierarchy construction,
-    and genome-wide permutation analysis for locus-level conherence testing of signals with multiple 
-    candidate causal variant peaks
-    against single-nucleus ATAC-seq reference matrices (cell type-specific markers and housekeeping genes).
+Description: Quantifies cell-type and lineage specificity of chromatin
+    accessibility at GWAS variant loci. Provides L2-based high-specificity
+    and dominance annotations, combined peak summaries, lineage hierarchy
+    construction, global rank enrichment, and standalone offline HTML reports.
+    Per-cell and depth normalisation and accessibility filtering are optional.
+    Signal categories are descriptive, not locus-level significance tests.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: false
@@ -27,7 +27,6 @@ biocViews:
     FunctionalGenomics,
     CellTypeSpecificity,
     DataVisualization,
-    PermutationTest,
     GenomeWideEnrichment,
     lineage,
     coherence,
@@ -35,6 +34,7 @@ biocViews:
 Depends:
     R (>= 4.2)
 Imports:
+    BiocGenerics,
     SummarizedExperiment,
     GenomicRanges,
     S4Vectors,
@@ -53,6 +53,8 @@ Imports:
     ComplexHeatmap,
     circlize,
     grid,
+    graphics,
+    gridExtra,
     grDevices,
     stats,
     utils,
@@ -62,6 +64,7 @@ Imports:
 Suggests:
     svglite,
     testthat (>= 3.0.0),
+    withr,
     knitr,
     rmarkdown
 URL:

@@ -21,19 +21,15 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
   # --- Cell-type level: high / mid / low counts and names ---
   specificity_basic <- data.frame(
     peak = rownames(gwas_mat),
-    n_high = rowSums(gwas_mat > high_thresh),
-    n_mid = rowSums(gwas_mat > mid_thresh & gwas_mat <= high_thresh),
-    n_low = rowSums(gwas_mat <= mid_thresh)
+    n_high = rowSums(.aboveThreshold(gwas_mat, high_thresh)),
+    n_mid = rowSums(.aboveThreshold(gwas_mat, mid_thresh) & !.aboveThreshold(gwas_mat, high_thresh)),
+    n_low = rowSums(!.aboveThreshold(gwas_mat, mid_thresh))
   )
 
-  high_cells <- apply(gwas_mat, 1, function(x) names(x)[x > high_thresh])
-  specificity_basic$high_cells <- sapply(high_cells, paste, collapse = ", ")
-  specificity_basic$multiple_high <- lengths(high_cells) > 1
-
-  mid_cells <- apply(gwas_mat, 1, function(x) {
-    names(x)[x > mid_thresh & x <= high_thresh]
-  })
-  specificity_basic$mid_cells <- sapply(mid_cells, paste, collapse = ", ")
+  specificity_basic$high_cells <- .specNamesFromMask(.aboveThreshold(gwas_mat, high_thresh))
+  specificity_basic$multiple_high <- specificity_basic$n_high > 1
+  specificity_basic$mid_cells <- .specNamesFromMask(
+    .aboveThreshold(gwas_mat, mid_thresh) & !.aboveThreshold(gwas_mat, high_thresh))
 
   specificity_summary_l2 <- specificity_summary_l2_detailed %>%
     left_join(specificity_basic, by = "peak")
@@ -56,14 +52,14 @@ addSpecificity <- function(gwas_mat, snps, high_thresh, mid_thresh, results_dir,
     lin_high_thresh <- high_thresh
     lin_mid_thresh  <- mid_thresh
 
-    specificity_summary_l2$n_high_lineage <- rowSums(lineage_mat > lin_high_thresh)
-    specificity_summary_l2$n_mid_lineage  <- rowSums(lineage_mat > lin_mid_thresh & lineage_mat <= lin_high_thresh)
-    specificity_summary_l2$n_low_lineage  <- rowSums(lineage_mat <= lin_mid_thresh)
+    specificity_summary_l2$n_high_lineage <- rowSums(.aboveThreshold(lineage_mat, lin_high_thresh))
+    specificity_summary_l2$n_mid_lineage <- rowSums(
+      .aboveThreshold(lineage_mat, lin_mid_thresh) & !.aboveThreshold(lineage_mat, lin_high_thresh))
+    specificity_summary_l2$n_low_lineage <- rowSums(!.aboveThreshold(lineage_mat, lin_mid_thresh))
 
-    high_lin <- apply(lineage_mat, 1, function(x) names(x)[x > lin_high_thresh])
-    mid_lin  <- apply(lineage_mat, 1, function(x) names(x)[x > lin_mid_thresh & x <= lin_high_thresh])
-    specificity_summary_l2$high_lineages <- sapply(high_lin, paste, collapse = ", ")
-    specificity_summary_l2$mid_lineages  <- sapply(mid_lin,  paste, collapse = ", ")
+    specificity_summary_l2$high_lineages <- .specNamesFromMask(.aboveThreshold(lineage_mat, lin_high_thresh))
+    specificity_summary_l2$mid_lineages <- .specNamesFromMask(
+      .aboveThreshold(lineage_mat, lin_mid_thresh) & !.aboveThreshold(lineage_mat, lin_high_thresh))
 
     specificity_summary_l2$top_lineage <- colnames(lineage_mat)[max.col(lineage_mat, ties.method = "first")]
     specificity_summary_l2$top_lineage_score <- apply(lineage_mat, 1, max)
@@ -172,16 +168,16 @@ addLineageSpecificity <- function(gwas_mat, snps, results_dir,
 
   spec_basic <- data.frame(
     peak = rownames(lineage_mat),
-    n_high_lineage = rowSums(lineage_mat > high_thresh_lin),
-    n_mid_lineage  = rowSums(lineage_mat > mid_thresh_lin & lineage_mat <= high_thresh_lin),
-    n_low_lineage  = rowSums(lineage_mat <= mid_thresh_lin),
+    n_high_lineage = rowSums(.aboveThreshold(lineage_mat, high_thresh_lin)),
+    n_mid_lineage = rowSums(.aboveThreshold(lineage_mat, mid_thresh_lin) &
+                            !.aboveThreshold(lineage_mat, high_thresh_lin)),
+    n_low_lineage = rowSums(!.aboveThreshold(lineage_mat, mid_thresh_lin)),
     stringsAsFactors = FALSE
   )
-  high_lin <- apply(lineage_mat, 1, function(x) names(x)[x > high_thresh_lin])
-  mid_lin  <- apply(lineage_mat, 1, function(x) names(x)[x > mid_thresh_lin & x <= high_thresh_lin])
-  spec_basic$high_lineages         <- sapply(high_lin, paste, collapse = ", ")
-  spec_basic$mid_lineages          <- sapply(mid_lin,  paste, collapse = ", ")
-  spec_basic$multiple_high_lineage <- lengths(high_lin) > 1
+  spec_basic$high_lineages <- .specNamesFromMask(.aboveThreshold(lineage_mat, high_thresh_lin))
+  spec_basic$mid_lineages <- .specNamesFromMask(
+    .aboveThreshold(lineage_mat, mid_thresh_lin) & !.aboveThreshold(lineage_mat, high_thresh_lin))
+  spec_basic$multiple_high_lineage <- spec_basic$n_high_lineage > 1
 
   lineage_summary <- spec_lin_detailed %>% dplyr::left_join(spec_basic, by = "peak")
 

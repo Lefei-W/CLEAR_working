@@ -23,7 +23,7 @@ loadCLEARInputs <- function(se_path, trait_path) {
 # subset (with CCVs / signal annotation), the L2 GWAS matrix,
 # and the raw findOverlaps Hits object.
 # ------------------------------------------------------------
-addGWASOverlap <- function(se, snps) {
+addGWASOverlap <- function(se, snps, se_all = NULL) {
   hits_se <- findOverlaps(snps, rowRanges(se)) # query = snps, subject = peaks
   gwas_idx <- unique(subjectHits(hits_se))
 
@@ -32,8 +32,9 @@ addGWASOverlap <- function(se, snps) {
   } else {
     se_gwas <- se[gwas_idx, , drop = FALSE]
 
-    snp_name_col <- if ("names" %in% colnames(mcols(snps))) mcols(snps)$names else names(snps)
-    signal_col   <- if ("signal" %in% colnames(mcols(snps))) mcols(snps)$signal else rep(NA_character_, length(snps))
+    fields <- .specReportSnpFields(snps)
+    snp_name_col <- fields$variant
+    signal_col <- fields$signal
 
     ann <- data.frame(
       peak_idx = subjectHits(hits_se),
@@ -58,11 +59,16 @@ addGWASOverlap <- function(se, snps) {
     rowData(se_gwas) <- S4Vectors::DataFrame(rd, row.names = rownames(se_gwas))
   }
 
+  n_dropped <- if (is.null(se_all)) 0L else
+    length(unique(subjectHits(findOverlaps(snps, rowRanges(se_all))))) - length(gwas_idx)
+  if (n_dropped > 0L) message("Accessibility filter removed ", n_dropped,
+                              " GWAS-overlapping peak(s).")
   list(
     hits_se  = hits_se,
     gwas_idx = gwas_idx,
     se_gwas  = se_gwas,
-    gwas_mat = assay(se_gwas, "raw_l2")
+    gwas_mat = assay(se_gwas, "raw_l2"),
+    n_dropped_by_filter = n_dropped
   )
 }
 
@@ -162,6 +168,14 @@ getInputSummary <- function(se_name, trait_name, se_path, trait_path,
     min_signal_lineage_value = min_signal_lin_value,
     stringsAsFactors = FALSE
   )
+  normalisation <- metadata(se)$CLEAR$normalisation
+  access_filter <- metadata(se)$CLEAR$access_filter
+  input_summary$per_cell_mode <- if (is.null(normalisation)) "no" else normalisation$per_cell_mode
+  input_summary$depth <- if (is.null(normalisation)) "none" else normalisation$depth
+  input_summary$access_filter_mode <- if (is.null(access_filter)) "none" else access_filter$mode
+  input_summary$access_filter_cut <- if (is.null(access_filter)) NA_real_ else access_filter$cut
+  input_summary$n_gwas_peaks_dropped_by_filter <- if (is.null(overlap$n_dropped_by_filter))
+    0L else overlap$n_dropped_by_filter
   write.table(input_summary, file.path(results_dir, "input_summary.txt"),
               sep = "\t", quote = FALSE, row.names = FALSE)
   input_summary

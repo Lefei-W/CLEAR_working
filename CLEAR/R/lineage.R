@@ -21,6 +21,10 @@ addLineageMap <- function(mat_l2, k_lineage = 4L) {
     colnames(mat_l2) <- paste0("ct", seq_len(ncol(mat_l2)))
   }
 
+  if (length(k_lineage) != 1L || !is.numeric(k_lineage) ||
+      !is.finite(k_lineage) || k_lineage != floor(k_lineage)) {
+    stop("k_lineage must be one whole number.")
+  }
   k_lineage <- as.integer(k_lineage)
   if (is.na(k_lineage) || k_lineage < 2L || k_lineage >= ncol(mat_l2)) {
     stop("k_lineage must be an integer in [2, ncol(mat_l2) - 1]; got ", k_lineage)
@@ -111,12 +115,14 @@ addLineageMap <- function(mat_l2, k_lineage = 4L) {
 # ------------------------------------------------------------
 getLineageMatrix <- function(mat_l2, cell_lineage) {
   lineage_vec <- cell_lineage[colnames(mat_l2)]
+  if (anyNA(lineage_vec) || any(!nzchar(lineage_vec))) {
+    stop("cell_lineage must label every matrix column.")
+  }
   lineage_levels <- unique(as.character(lineage_vec))
   mat_sq <- mat_l2^2
-  lineage_mat <- sapply(lineage_levels, function(lg) {
+  lineage_mat <- vapply(lineage_levels, function(lg) {
     sqrt(rowSums(mat_sq[, lineage_vec == lg, drop = FALSE]))
-  })
-  lineage_mat <- as.matrix(lineage_mat)
-  rownames(lineage_mat) <- rownames(mat_l2)
-  lineage_mat
+  }, numeric(nrow(mat_l2)))
+  matrix(lineage_mat, nrow(mat_l2), length(lineage_levels),
+         dimnames = list(rownames(mat_l2), lineage_levels))
 }

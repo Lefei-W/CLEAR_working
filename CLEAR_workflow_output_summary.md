@@ -1,4 +1,9 @@
-# CLEAR workflow and outputs (20-03 WIP: Step 7 & 8)
+# Historical CLEAR workflow notes (20-03 WIP: Step 7 & 8)
+
+These are historical research notes, not the current public workflow contract.
+See [the package README](CLEAR/README.md) for the combined peak table, offline
+HTML report, and opt-in normalisation/filtering. The default runner does not
+run the locus permutation analyses described below.
 
 This document the CLEAR running STEPS and the details of the results tables and plots produced.
 

@@ -54,7 +54,11 @@ prepareSE <- function(se, genome = "hg38") {
 }
 
 # Internal: column-wise descending rank
-.rankDesc <- function(M) apply(M, 2, function(x) rank(-x, ties.method = "average"))
+.rankDesc <- function(M) {
+  out <- vapply(seq_len(ncol(M)), function(j) rank(-M[, j], ties.method = "average"),
+                numeric(nrow(M)))
+  matrix(out, nrow(M), ncol(M), dimnames = dimnames(M))
+}
 
 # ------------------------------------------------------------
 # addSEMetrics
@@ -62,60 +66,59 @@ prepareSE <- function(se, genome = "hg38") {
 #   raw         - original counts (renamed for clarity)
 #   raw_l2      - L2-normalised (unit-norm rows, sum of s^2 = 1)
 #   raw_l2_rank - column-wise descending ranks of raw_l2
-#   cor_raw     - corpcor shrinkage-weighted raw counts  [OPTIONAL]
-#   cor_raw_l2  - corpcor shrinkage-weighted L2 scores   [OPTIONAL]
-#
-# The cor_* assays apply a Ledoit-Wolf shrinkage inverse-correlation
-# weighting (solve(cor) %*% t(mat)) to decorrelate highly correlated
-# cell types. They were explored as an alternative to plain L2 but
-# are NOT used in the current pipeline (specificity, dominance,
-# concordance all run on raw_l2). They are kept here so the option
-# is available and can be justified as an explored alternative.
+#   norm        - accessibility after optional per-cell/depth normalisation
+# Defaults leave the input scale unchanged. raw_l2 is computed from norm.
 # ------------------------------------------------------------
-addSEMetrics <- function(se, assay_name = NULL, keep_top_prop = NULL) {
+addSEMetrics <- function(se, assay_name = NULL, keep_top_prop = NULL,
+                         per_cell = c("no", "auto", "yes"),
+                         depth = c("none", "colsum", "quantile"), n_cells = NULL) {
+  per_cell <- match.arg(per_cell)
+  depth <- match.arg(depth)
   if (is.null(assay_name)) assay_name <- assayNames(se)[1]
 
   mat <- assay(se, assay_name)
   if (inherits(mat, "Matrix")) mat <- as.matrix(mat)
   storage.mode(mat) <- "double"
+  if (!nrow(mat) || !ncol(mat) || any(!is.finite(mat)) || any(mat < 0)) {
+    stop("Input accessibility must be a non-empty, finite, non-negative matrix.")
+  }
 
   rn <- rownames(se); if (is.null(rn)) rn <- paste0("peak_", seq_len(nrow(mat)))
   cn <- colnames(se); if (is.null(cn)) cn <- paste0("ct_", seq_len(ncol(mat)))
   dimnames(mat) <- list(rn, cn)
+  dimnames(se) <- list(rn, cn)
 
   row_sums <- rowSums(mat)
   if (!is.null(keep_top_prop)) {
+    if (length(keep_top_prop) != 1L || !is.finite(keep_top_prop) ||
+        keep_top_prop <= 0 || keep_top_prop > 1) stop("keep_top_prop must be in (0, 1].")
     thr <- stats::quantile(row_sums, probs = 1 - keep_top_prop, na.rm = TRUE)
     keep <- row_sums > thr
     se <- se[keep, , drop = FALSE]
     mat <- mat[keep, , drop = FALSE]
     rn <- rn[keep]
     dimnames(mat) <- list(rn, cn)
+    if (!nrow(mat)) stop("keep_top_prop removed every peak.")
   }
 
-  raw_l2 <- t(apply(mat, 1, .safeL2)); dimnames(raw_l2) <- list(rn, cn)
-
-  cor_weight <- function(m) {
-    R <- corpcor::cor.shrink(m)
-    w <- t(solve(R) %*% t(m))
-    dimnames(w) <- dimnames(m)
-    w
-  }
-  cor_raw    <- cor_weight(mat)
-  cor_raw_l2 <- cor_weight(raw_l2)
+  normalised <- .normaliseAccessibility(mat, se, per_cell, depth, n_cells)
+  norm <- normalised$norm
+  denom <- sqrt(rowSums(norm^2))
+  denom[denom == 0] <- 1
+  raw_l2 <- norm / denom
 
   assays(se)[["raw"]]         <- mat
+  assays(se)[["norm"]]        <- norm
   assays(se)[["raw_l2"]]      <- raw_l2
   assays(se)[["raw_l2_rank"]] <- .rankDesc(raw_l2)
-  # assays(se)[["cor_raw"]]     <- cor_raw
-  # assays(se)[["cor_raw_l2"]]  <- cor_raw_l2
 
   metadata(se)$CLEAR <- list(
     source_assay  = assay_name,
     keep_top_prop = keep_top_prop,
     n_peaks       = nrow(se),
     n_celltypes   = ncol(se),
-    use_l2_only   = TRUE
+    use_l2_only   = TRUE,
+    normalisation = normalised$metadata
   )
   se
 }

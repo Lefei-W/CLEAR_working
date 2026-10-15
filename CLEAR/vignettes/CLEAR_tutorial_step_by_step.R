@@ -1,14 +1,4 @@
-setwd('/Users/lefeiwang/Desktop/CLEAR_test/')
-
-install.packages(c("remotes", "BiocManager"),
-                 repos = "https://cloud.r-project.org")
-
-remotes::install_github(
-  repo         = "Lefei-W/CLEAR_working",
-  subdir       = "CLEAR",
-  dependencies = TRUE,     # CRAN + Bioconductor (auto via biocViews:)
-  upgrade      = "never"
-)
+# Install CLEAR as described in README.md, then edit these input paths.
 
 # ============================================================
 # 1. Load environment
@@ -17,15 +7,6 @@ remotes::install_github(
 suppressPackageStartupMessages({
   library(CLEAR)
   library(SummarizedExperiment)
-  library(GenomicRanges)
-  library(S4Vectors)
-  library(IRanges)
-  library(rtracklayer)
-  library(ComplexHeatmap)
-  library(dplyr)
-  library(ggplot2)
-  library(GenomeInfoDb)
-  library(corpcor)
 })
 
 
@@ -41,18 +22,19 @@ se_name    <- "breast_inhouse"
 trait_name <- "BCAC_5375"
 
 # Should be standard at least hg38 
-gtf_path   <- "gencode.v49.chr_patch_hapl_scaff.annotation.gtf.gz"
+gtf_path   <- NULL  # Optional local GTF for TSS and nearest-gene annotation.
 
 
 # ============================================================
 # Output structure
 # ------------------------------------------------------------
 # All outputs land under <wd>/<se_name>_x_<trait_name>/ with
-# four sub-folders:
+# sub-folders:
 #   results/         tables, summary files
 #   plots/           PDFs
 #   data/            generic working data (rarely used)
 #   processed_data/  cached processed SE (raw + L2 assays)
+#   report/          standalone HTML explorer
 # ============================================================
 run_tag <- paste0(se_name, "_x_", trait_name)
 out_dir <- file.path(getwd(), run_tag)
@@ -74,32 +56,20 @@ message("Output folder: ", out_dir)
 # ============================================================
 # 3. Load + cache SE; compute L2 metrics
 # ------------------------------------------------------------
-# Processed SE (raw + raw_l2 + raw_l2_rank assays) is written
-# to processed_data/<se_name>_processed.rds; subsequent runs
-# reuse the cache instead of re-normalising.
+# This tutorial processes the input explicitly. The master runner additionally
+# validates and reuses caches keyed by normalisation settings.
 # ============================================================
-
-CLEAR::prepareSE
-CLEAR::addSEMetrics
-
-loadCLEARInputs(se_path, trait_path)
-
 
 se <- readRDS(se_path)
 se <- prepareSE(se)
 se <- addSEMetrics(se)
+# Opt-in alternative, starting from the unprocessed input:
+# se <- addSEMetrics(prepareSE(readRDS(se_path)), per_cell = "yes", depth = "colsum")
+se_all <- flagAccessiblePeaks(se)  # No filter by default.
+# Opt-in alternative:
+# se_all <- flagAccessiblePeaks(se, min_max_quantile = 0.1)
+se <- filterAccessiblePeaks(se_all)
 saveRDS(se, processed_se_path)
-
-
-# Safety net: refresh cache if assays are incomplete
-required_assays <- c("raw", "raw_l2", "raw_l2_rank")
-if (!all(required_assays %in% assayNames(se))) {
-  message("Cached SE missing required assays; refreshing")
-  se <- readRDS(se_path)
-  se <- prepareSE(se)
-  se <- addSEMetrics(se)
-  saveRDS(se, processed_se_path)
-}
 
 mat_l2 <- assay(se, "raw_l2")
 message("SE: ", nrow(se), " peaks x ", ncol(se), " cell types")
@@ -124,7 +94,7 @@ plotLineageDendrogram(lineage_obj, se_name, plots_dir, k_preview = 3:6)
 # 5. Load trait + GWAS overlap
 # ============================================================
 snps     <- readRDS(trait_path)
-overlap  <- addGWASOverlap(se, snps)
+overlap  <- addGWASOverlap(se, snps, se_all = se_all)
 se_gwas  <- overlap$se_gwas
 gwas_mat <- overlap$gwas_mat
 
@@ -157,3 +127,31 @@ if (nrow(gwas_mat) > 1) {
   plotLineageDensities(gwas_mat, lineage_obj$cell_lineage, tag, plots_dir,
                        lineage_colours = lineage_obj$lineage_colours)
 }
+
+# 7. One combined peak table. Legacy separate-table APIs remain available.
+input_summary <- getInputSummary(
+  se_name, trait_name, se_path, trait_path, se, snps, overlap, results_dir,
+  cell_lineage = lineage_obj$cell_lineage)
+peak_summary <- addSpecPeakTable(
+  gwas_mat, snps, se_gwas, results_dir,
+  cell_lineage = lineage_obj$cell_lineage, gtf_path = gtf_path)
+
+# 8. Global enrichment on the same retained peak universe.
+global_cell <- addGlobalEnrichment(
+  se, snps, mat_l2, results_dir, plots_dir, se_name, trait_name,
+  level = "cell", lineage_palette = lineage_obj$palette)
+global_lineage <- addGlobalEnrichment(
+  se, snps, mat_l2, results_dir, plots_dir, se_name, trait_name,
+  level = "lineage", cell_lineage = lineage_obj$cell_lineage,
+  lineage_colours = lineage_obj$lineage_colours)
+
+# 9. Open this HTML file locally; it has no server or network dependency.
+report_file <- writeSpecHtmlReport(
+  se_name, trait_name, mat_l2, gwas_mat, se_gwas, snps,
+  peak_cell = peak_summary, lineage_obj = lineage_obj,
+  global_enrichment_cell = global_cell,
+  global_enrichment_lineage = global_lineage,
+  input_summary = input_summary,
+  output_file = file.path(out_dir, "report", "index.html"),
+  mapping_file = file.path(results_dir, "signal_variant_peak_map.txt"),
+  signal_file = file.path(results_dir, "signal_summary.txt"))
